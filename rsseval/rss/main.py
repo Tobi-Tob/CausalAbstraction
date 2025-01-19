@@ -226,3 +226,116 @@ if __name__ == "__main__":
     args = parse_args()
 
     main(args)
+
+"""
+General Arguments
+
+    --model
+        Description: Specifies the model for inference or training.
+        Choices: {boiacbm, boiadpl, boialtn, boiann, cext, cvae, kandcbm, kandclip, kanddpl, kandltn, kandnn, kandpreprocess, minikanddpl, mnistcbm,
+        mnistclip, mnistdpl, mnistdplrec, mnistltn, mnistnn, mnistpcbmdpl, mnistpcbmltn, mnistpcbmsl, mnistsl, mnistslrec, mnmathcbm, mnmathdpl,
+        mnmathnn, presddoiadpl, sddoiacbm, sddoiaclip, sddoiadpl, sddoialtn, sddoiann, xorcbm, xordpl, xornn}
+        Example: --model mnistdpl
+
+    --dataset
+        Description: The dataset to be used for training or testing.
+        Choices:
+        shortmnist (Shortcut MNIST ? A simplified version of the MNIST dataset, focused on learning binary classification tasks like even vs. odd)
+        clipshortmnist (A variation of shortmnist where features are preprocessed or extracted using CLIP - Contrastive Language-Image Pretraining)
+        halfmnist (???)
+        mnmath (Likely a dataset involving mathematical tasks, such as addition or subtraction using MNIST digits)
+        restrictedmnist (???)
+        xor (A dataset for learning the XOR logical operation, often used as a toy problem in explainability research)
+
+    --load_best_args
+        Description: Loads predefined optimal arguments for the method, dataset, and memory buffer.
+
+    --seed
+        Description: Sets the random seed for reproducibility.
+        Example: --seed 42
+
+    --notes
+        Description: Adds notes for this run.
+        Example: --notes "Testing new architecture"
+
+    --non_verbose
+        Description: Suppresses detailed logging output.
+
+    --wandb
+        Description: Enables logging to WandB and sets the project name. If you used WandB for logging during training, evaluation metrics and
+        visualizations will appear on the WandB dashboard.
+        Example: --wandb my_project
+
+    --checkin
+        Description: Specifies the path to load a checkpoint.
+        Example: --checkin /path/to/checkpoint
+
+    --checkout
+        Description: Saves the trained model to data/ckpts.
+        Example: --checkout
+
+    --posthoc
+        Description: The --posthoc flag loads the saved model and evaluates it directly on the test dataset. This bypasses any training process and
+        focuses solely on performance metrics. Uses test.py script that searches for saved models according to the provided args, also seed is fixed
+        Example: python main.py --dataset shortmnist --model mnistdpl --posthoc
+
+    --probe
+        Description: The --probe flag performs a non-linear probing analysis of the trained model. It evaluates how well the model's learned
+        representations can perform on secondary tasks or metrics.
+        Example: python main.py --dataset shortmnist --model mnistdpl --checkin best_model_shortmnist_mnistdpl_0.pth --probe
+
+    --validate
+        Description: If you are tuning hyperparameters, you can use --validate to evaluate the model on the validation set. This is used to assess
+        performance during optimization.
+        Example: python main.py --dataset shortmnist --model mnistdpl --checkin best_model_shortmnist_mnistdpl_0.pth --validate
+
+    --preprocess
+        Description: Preprocesses the dataset.
+        Datatype: flag (no value required)
+        Example: --preprocess
+
+Training Arguments
+
+    --n_epochs
+        Description: Number of training epochs.
+        Example: --n_epochs 20
+
+    --lr
+        Description: Learning rate for optimization.
+        Example: --lr 0.001
+
+    --batch_size
+        Description: Number of samples per training batch.
+        Example: --batch_size 64
+
+    --exp_decay
+        Description: Exponential decay factor for learning rate.
+        Example: --exp_decay 0.9
+
+    --c_sup
+        Description: The --c_sup argument controls the supervision coefficient used during training. It determines how much weight is assigned to the
+        supervised loss term.
+        Example: --c_sup 0.05
+
+    --task
+        Description: Specifies the task, such as addition.
+        Potential Choices: addition, subtraction, classification, logic
+
+    --backbone
+        Description: Specifies the model's backbone (e.g., conceptizer or neural).
+        Example: --backbone conceptizer
+
+Hyperparameter Tuning Arguments
+
+    --tuning
+        Description: The --tuning argument enables hyperparameter tuning for the model using a Bayesian search strategy. This allows for automated optimization of key hyperparameters to maximize or minimize a given validation metric (e.g., F1 score, accuracy, etc.). The script runs a search process over a predefined range of hyperparameters (e.g., learning rate, batch size, weight decay) to find the best combination.
+        Example: python main.py --dataset shortmnist --model mnistdpl --n_epochs 20 --lr 0.001 --batch_size 64 --exp_decay 0.99 --c_sup 0 --checkout --task addition --proj_name MNIST-DPL --tuning --val_metric f1
+
+    --val_metric
+        Description: The --val_metric argument specifies the metric that the tuning process will optimize. This metric is calculated on the validation set during tuning runs.
+        Choices: --val_metric {f1, accuracy, precision, recall, loss}
+
+    --proj_name
+        Description: Project name used during WandB tuning.
+        Example: --proj_name MNIST-DPL
+"""
