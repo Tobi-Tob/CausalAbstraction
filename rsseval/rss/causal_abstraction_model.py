@@ -69,27 +69,80 @@ class CausalEqualityModel(CausalModel):
         super().__init__(variables, values, parents, functions, pos=pos)  # build Causal Model
 
     def generate_data(self, dim=2, n_examples=131072, include_counterfactuals=False, save_dir="data"):
-        def input_sampler():
-            A = randvec(dim)
-            B = randvec(dim)
-            C = randvec(dim)
-            D = randvec(dim)
-            x = random.randint(1, 4)
-            if x == 1:
-                return {"W": A, "X": B, "Y": C, "Z": D}
-            elif x == 2:
-                return {"W": A, "X": A, "Y": B, "Z": B}
-            elif x == 3:
-                return {"W": A, "X": A, "Y": C, "Z": D}
-            elif x == 4:
-                return {"W": A, "X": B, "Y": C, "Z": C}
-
         os.makedirs(save_dir, exist_ok=True)
-        print(f"Generating {n_examples} examples in directory '{save_dir}' (ETC: {n_examples / 4000:.0f}s) ...")
+
+        # Generate counterfactual dataset
         if include_counterfactuals:
+            def intervention_id(intervention):
+                if "WX" in intervention and "YZ" in intervention:
+                    return 2
+                if "WX" in intervention:
+                    return 0
+                if "YZ" in intervention:
+                    return 1
+                else:
+                    raise ValueError("Invalid intervention")
+
+            def input_sampler(*args, **kwargs):
+                A = randvec(dim)
+                B = randvec(dim)
+                C = randvec(dim)
+                D = randvec(dim)
+                if kwargs.get('output_var', None) is None:
+                    return random.choice([
+                        {"W": A, "X": B, "Y": C, "Z": D},
+                        {"W": A, "X": A, "Y": B, "Z": B},
+                        {"W": A, "X": A, "Y": C, "Z": D},
+                        {"W": A, "X": B, "Y": C, "Z": C}
+                    ])
+                elif kwargs['output_var'] == 'WX' and kwargs['output_var_value']:
+                    return random.choice([
+                        {"W": A, "X": A, "Y": C, "Z": D},
+                        {"W": A, "X": A, "Y": C, "Z": C}
+                    ])
+                elif kwargs['output_var'] == 'WX' and not kwargs['output_var_value']:
+                    return random.choice([
+                        {"W": A, "X": B, "Y": C, "Z": D},
+                        {"W": A, "X": B, "Y": C, "Z": C}
+                    ])
+                elif kwargs['output_var'] == 'YZ' and kwargs['output_var_value']:
+                    return random.choice([
+                        {"W": A, "X": B, "Y": C, "Z": C},
+                        {"W": A, "X": A, "Y": C, "Z": C}
+                    ])
+                else:
+                    return random.choice([
+                        {"W": A, "X": B, "Y": C, "Z": D},
+                        {"W": A, "X": A, "Y": C, "Z": D}
+                    ])
+
+            print(f"Generating {n_examples} examples in directory '{save_dir}' (ETC: {n_examples / 1400:.0f}s) ...")
+
+            dataset = self.generate_counterfactual_dataset(
+                n_examples, intervention_id, batch_size=6400, sampler=input_sampler
+                # what is sampler=self.sample_input_tree_balanced?
+            )
             filename = f"equality_task_counterfactual_data_dim{dim}.pt"
-            raise NotImplementedError("Counterfactuals are not yet implemented")
+
+        # Generate factual dataset
         else:
+            def input_sampler():
+                A = randvec(dim)
+                B = randvec(dim)
+                C = randvec(dim)
+                D = randvec(dim)
+                x = random.randint(1, 4)
+                if x == 1:
+                    return {"W": A, "X": B, "Y": C, "Z": D}
+                elif x == 2:
+                    return {"W": A, "X": A, "Y": B, "Z": B}
+                elif x == 3:
+                    return {"W": A, "X": A, "Y": C, "Z": D}
+                elif x == 4:
+                    return {"W": A, "X": B, "Y": C, "Z": C}
+
+            print(f"Generating {n_examples} examples in directory '{save_dir}' (ETC: {n_examples / 4000:.0f}s) ...")
+
             dataset = self.generate_factual_dataset(n_examples, input_sampler)
             filename = f"equality_task_data_dim{dim}.pt"
 
@@ -104,13 +157,14 @@ def randvec(dim, lower=-1, upper=1):
 
 if __name__ == "__main__":
     object_dim = 2
-    # number_of_examples = 20
-    # reps = [randvec(object_dim, lower=-1, upper=1) for _ in range(number_of_examples)]
 
     equality_model = CausalEqualityModel(object_dim)
 
-    equality_model.generate_data(dim=object_dim, n_examples=131072, include_counterfactuals=False)
+    equality_model.generate_data(dim=object_dim, n_examples=131072, include_counterfactuals=True)
 
-    #dataset = torch.load("data/equality_task_small_data_dim2.pt", weights_only=True)
-    #X = torch.stack([example['input_ids'] for example in dataset])
-    #y = torch.stack([example['labels'] for example in dataset])
+    # dataset = torch.load("data/equality_task_counterfactual_data_dim2.pt", weights_only=True)
+    # print(dataset[0]["input_ids"])
+    # print(dataset[0]["source_input_ids"])
+    # print(dataset[0]["base_labels"])
+    # print(dataset[0]["labels"])
+    # print(dataset[0]["intervention_id"])
