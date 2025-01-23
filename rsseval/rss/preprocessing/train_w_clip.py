@@ -8,7 +8,7 @@ import preprocessing.similarity as similarity
 import datetime
 import json
 
-from datasets.utils.kand_creation import KAND_Dataset
+from task_datasets.utils.kand_creation import KAND_Dataset
 
 from utils.glm_saga.elasticnet import IndexedTensorDataset, glm_saga
 from torch.utils.data import DataLoader, TensorDataset

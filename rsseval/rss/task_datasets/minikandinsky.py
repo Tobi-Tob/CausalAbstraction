@@ -1,5 +1,5 @@
-from datasets.utils.base_dataset import BaseDataset, KAND_get_loader
-from datasets.utils.kand_creation import KAND_Dataset, miniKAND_Dataset
+from task_datasets.utils.base_dataset import BaseDataset, KAND_get_loader
+from task_datasets.utils.kand_creation import KAND_Dataset, miniKAND_Dataset
 from backbones.kand_encoder import TripleCNNEncoder, TripleMLP
 import time
 import os

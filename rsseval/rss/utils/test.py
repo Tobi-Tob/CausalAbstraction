@@ -1,6 +1,5 @@
-import numpy as np
 from utils.wandb_logger import *
-from datasets.utils.base_dataset import BaseDataset
+from task_datasets.utils.base_dataset import BaseDataset
 from models.mnistdpl import MnistDPL
 from utils.metrics import evaluate_metrics
 from utils import fprint

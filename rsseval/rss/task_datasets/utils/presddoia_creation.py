@@ -4,8 +4,8 @@ import torch.utils.data
 import numpy as np, glob
 import re
 import json
-from datasets.utils.mnist_creation import generate_r_seq
-from datasets.utils.sddoia_creation import CONCEPTS_ORDER
+from task_datasets.utils.mnist_creation import generate_r_seq
+from task_datasets.utils.sddoia_creation import CONCEPTS_ORDER
 
 PREFIX = "MINI_BOIA_"
 

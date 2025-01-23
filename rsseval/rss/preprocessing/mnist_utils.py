@@ -1,4 +1,4 @@
-from datasets.utils.base_dataset import BaseDataset, get_loader
+from task_datasets.utils.base_dataset import BaseDataset, get_loader
 from preprocessing.mnist.mnist_creation import load_2MNIST
 from backbones.addmnist_joint import MNISTPairsEncoder, MNISTPairsDecoder
 from backbones.addmnist_single import MNISTSingleEncoder

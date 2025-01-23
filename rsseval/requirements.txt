@@ -115,7 +115,7 @@ pyparsing==3.0.7
 pyrsistent==0.19.2
 PySocks==1.7.1
 python-dateutil==2.8.2
-pytorch-lightning==1.5.9
+pytorch-lightning
 pytorchcv==0.0.67
 pytz==2021.3
 PyWavelets==1.2.0

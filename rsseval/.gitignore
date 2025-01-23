@@ -24,9 +24,9 @@ rss/preprocessing/saved_models
 rss/preprocessing/mnist/2mnist_10digits
 
 rss/wandb
-rss/datasets/utils/2mnist_10digits
+rss/task_datasets/utils/2mnist_10digits
 rss/run_slurm.sh
 rss/logs
-rss/datasets/__pycache__
+rss/task_datasets/__pycache__
 rss/data
 rss/preprocessing/logs

@@ -7,7 +7,7 @@ import re
 import matplotlib.pyplot as plt
 import json
 from torchvision.datasets.folder import pil_loader
-from datasets.utils.mnist_creation import generate_r_seq
+from task_datasets.utils.mnist_creation import generate_r_seq
 
 
 CONCEPTS_ORDER = {

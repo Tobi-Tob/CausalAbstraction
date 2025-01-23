@@ -1,7 +1,7 @@
 # Args module
 
 from argparse import ArgumentParser
-from datasets import NAMES as DATASET_NAMES
+from task_datasets import NAMES as DATASET_NAMES
 from models import get_all_models
 
 

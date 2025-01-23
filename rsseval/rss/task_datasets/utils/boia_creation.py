@@ -2,8 +2,8 @@ import torch
 import torch.utils.data
 from torch.utils.data import Dataset
 import pickle
-from datasets.utils.mnist_creation import generate_r_seq
-from datasets.utils.sddoia_creation import CONCEPTS_ORDER
+from task_datasets.utils.mnist_creation import generate_r_seq
+from task_datasets.utils.sddoia_creation import CONCEPTS_ORDER
 
 
 class BOIADataset(Dataset):

@@ -8,7 +8,7 @@ import importlib
 import setproctitle, socket, uuid
 import datetime
 
-from datasets import get_dataset
+from task_datasets import get_dataset
 from models import get_model
 from utils.train import train
 from utils.test import test

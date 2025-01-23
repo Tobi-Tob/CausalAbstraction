@@ -6,7 +6,7 @@ import os
 
 from utils.wandb_logger import *
 from utils.status import progress_bar
-from datasets.utils.base_dataset import BaseDataset
+from task_datasets.utils.base_dataset import BaseDataset
 from models.mnistdpl import MnistDPL
 from utils.dpl_loss import ADDMNIST_DPL
 

@@ -1,58 +1,49 @@
-from argparse import Namespace
-from datasets.utils.base_dataset import BaseDataset, BOIA_get_loader
-from datasets.utils.boia_creation import CLIPBOIADataset
-from datasets.utils.sddoia_creation import CONCEPTS_ORDER
-from backbones.boia_linear import BOIAConceptizer
-from backbones.boia_mlp import CLIPMLP
+from task_datasets.utils.sddoia_creation import ClIP_SDDOIADataset
+from backbones.identity import Identity
+from backbones.disent_encoder_decoder import DecoderConv64
 import time
+
+from task_datasets.utils.base_dataset import BaseDataset, SDDOIA_get_loader
+from task_datasets.utils.sddoia_creation import CONCEPTS_ORDER
+from task_datasets.utils.presddoia_creation import PreSDDOIADataset
+from backbones.sddoiacnn import FFNN
+from backbones.presddoiacnn import PreSDDOIAMlp
+
+import torch
 import os
 import numpy as np
-import torch
+from argparse import Namespace
 
 
-class CLIPBOIA(BaseDataset):
-    NAME = "clipboia"
+class CLIPSDDOIA(BaseDataset):
+    NAME = "clipsddoia"
 
-    def __init__(self, args: Namespace) -> None:
+    def __init__(self, args) -> None:
         super().__init__(args)
+
+    def get_backbone(self, args=None):
+        return Identity(21, 1), None
+
+    def get_split(self):
+        return 3, ()
+
+    def print_stats(self):
+        print("Hello CLIP")
 
     def get_data_loaders(self):
         start = time.time()
 
-        image_dir = "data/bdd2048/"
-
-        train_data_path = "/data/bdd2048/train_BDD_OIA.pkl"
-        val_data_path = "data/bdd2048/val_BDD_OIA.pkl"
-        test_data_path = "data/bdd2048/test_BDD_OIA.pkl"
-
-        self.dataset_train = CLIPBOIADataset(
-            pkl_file_path=train_data_path,
-            use_attr=True,
-            no_img=False,
-            uncertain_label=False,
-            image_dir=image_dir + "train",
-            n_class_attr=2,
-            transform=None,
+        self.dataset_train = ClIP_SDDOIADataset(
+            base_path="data",
+            split="train",
             c_sup=self.args.c_sup,
             which_c=self.args.which_c,
         )
-        self.dataset_val = CLIPBOIADataset(
-            pkl_file_path=val_data_path,
-            use_attr=True,
-            no_img=False,
-            uncertain_label=False,
-            image_dir=image_dir + "val",
-            n_class_attr=2,
-            transform=None,
-        )
-        self.dataset_test = CLIPBOIADataset(
-            pkl_file_path=test_data_path,
-            use_attr=True,
-            no_img=False,
-            uncertain_label=False,
-            image_dir=image_dir + "test",
-            n_class_attr=2,
-            transform=None,
+        self.dataset_val = ClIP_SDDOIADataset(base_path="data", split="val")
+        self.dataset_test = ClIP_SDDOIADataset(base_path="data", split="test")
+        self.dataset_ood = ClIP_SDDOIADataset(base_path="data", split="ood")
+        self.dataset_ood_ambulance = ClIP_SDDOIADataset(
+            base_path="data", split="ood_ambulance", is_ood_k=True
         )
 
         print(f"Loaded datasets in {time.time()-start} s.")
@@ -65,23 +56,29 @@ class CLIPBOIA(BaseDataset):
         )
         print(" len test:", len(self.dataset_test))
 
-        self.train_loader = BOIA_get_loader(
+        self.train_loader = SDDOIA_get_loader(
             self.dataset_train, self.args.batch_size, val_test=False
         )
-        self.val_loader = BOIA_get_loader(
+        self.val_loader = SDDOIA_get_loader(
             self.dataset_val, self.args.batch_size, val_test=True
         )
-        self.test_loader = BOIA_get_loader(
+        self.test_loader = SDDOIA_get_loader(
             self.dataset_test, self.args.batch_size, val_test=True
+        )
+        self.ood_loader = SDDOIA_get_loader(
+            self.dataset_ood, self.args.batch_size, val_test=True
+        )
+        self.ood_loader_ambulance = SDDOIA_get_loader(
+            self.dataset_ood_ambulance, self.args.batch_size, val_test=True
         )
 
         return self.train_loader, self.val_loader, self.test_loader
 
     def get_backbone(self):
-        if self.args.backbone == "neural":
-            return CLIPMLP(), None
-
-        return BOIAConceptizer(din=2048, nconcept=21), None
+        # if self.args.backbone == "neural":
+        #     return
+        #     return Identity(21,1), None
+        return FFNN().to(torch.float64), None
 
     def get_split(self):
         return 1, ()
@@ -95,20 +92,21 @@ class CLIPBOIA(BaseDataset):
         print("Train samples", len(self.dataset_train))
         print("Validation samples", len(self.dataset_val))
         print("Test samples", len(self.dataset_test))
+        print("Test OOD samples", len(self.dataset_ood))
 
     def _create_dir(self, directory):
         if not os.path.exists(directory):
             os.makedirs(directory)
 
-    def save_minibboia_tcav_loader(self, d_type: str, folder_name="boia-tcav-clip"):
+    def save_minibboia_tcav_loader(self, d_type: str, folder_name="sddoia-tcav-clip"):
 
         # 1 as batch size and not shuffled
         if d_type == "train":
-            dataloader = BOIA_get_loader(self.dataset_train, 1, val_test=True)
+            dataloader = SDDOIA_get_loader(self.dataset_train, 1, val_test=True)
         elif d_type == "val":
-            dataloader = BOIA_get_loader(self.dataset_val, 1, val_test=True)
+            dataloader = SDDOIA_get_loader(self.dataset_val, 1, val_test=True)
         else:
-            dataloader = BOIA_get_loader(self.dataset_test, 1, val_test=True)
+            dataloader = SDDOIA_get_loader(self.dataset_test, 1, val_test=True)
 
         self._create_dir(f"data/{folder_name}")
 
@@ -117,6 +115,8 @@ class CLIPBOIA(BaseDataset):
             self._create_dir(f"data/{folder_name}/{c}")
             counter.append(0)
 
+        # count = 0
+        np.random.seed(42)
         limit = 1000
 
         for i, data in enumerate(dataloader):
@@ -176,7 +176,7 @@ if __name__ == "__main__":
         which_c=-1,
     )
 
-    dataset = CLIPBOIA(args)
+    dataset = CLIPSDDOIA(args)
 
     train, val, test = dataset.get_data_loaders()
     dataset.save_minibboia_tcav_loader("val")

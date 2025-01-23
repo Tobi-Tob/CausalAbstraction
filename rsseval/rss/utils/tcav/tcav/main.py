@@ -11,17 +11,17 @@ from torch.utils.data import DataLoader
 
 torch.multiprocessing.set_sharing_strategy("file_system")
 
-from datasets.boia import BOIA
-from datasets.sddoia import SDDOIA
-from datasets.minikandinsky import MiniKandinsky
-from datasets.kandinsky import Kandinsky
-from datasets.shortcutmnist import SHORTMNIST
-from datasets.clipshortcutmnist import CLIPSHORTMNIST
-from datasets.clipboia import CLIPBOIA
-from datasets.clipsddoia import CLIPSDDOIA
-from datasets.clipkandinsky import CLIPKandinsky
-from datasets.xor import MNLOGIC
-from datasets.mnmath import MNMATH
+from taskdatasets.boia import BOIA
+from taskdatasets.sddoia import SDDOIA
+from taskdatasets.minikandinsky import MiniKandinsky
+from taskdatasets.kandinsky import Kandinsky
+from taskdatasets.shortcutmnist import SHORTMNIST
+from taskdatasets.clipshortcutmnist import CLIPSHORTMNIST
+from taskdatasets.clipboia import CLIPBOIA
+from taskdatasets.clipsddoia import CLIPSDDOIA
+from taskdatasets.clipkandinsky import CLIPKandinsky
+from taskdatasets.xor import MNLOGIC
+from taskdatasets.mnmath import MNMATH
 from models.boiann import BOIAnn
 from models.sddoiann import SDDOIAnn
 from models.sddoiacbm import SDDOIACBM

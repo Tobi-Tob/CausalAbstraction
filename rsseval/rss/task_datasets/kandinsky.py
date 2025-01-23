@@ -1,5 +1,5 @@
-from datasets.utils.base_dataset import BaseDataset, KAND_get_loader
-from datasets.utils.kand_creation import KAND_Dataset
+from task_datasets.utils.base_dataset import BaseDataset, KAND_get_loader
+from task_datasets.utils.kand_creation import KAND_Dataset
 from backbones.disent_encoder_decoder import DecoderConv64, EncoderConv64
 from backbones.resnet import ResNetEncoder
 from backbones.kandcnn_single import KANDCNNSingle

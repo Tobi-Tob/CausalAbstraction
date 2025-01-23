@@ -1,6 +1,6 @@
 from argparse import Namespace
-from datasets.utils.base_dataset import BaseDataset, SDDOIA_get_loader
-from datasets.utils.sddoia_creation import SDDOIADataset, CONCEPTS_ORDER
+from task_datasets.utils.base_dataset import BaseDataset, SDDOIA_get_loader
+from task_datasets.utils.sddoia_creation import SDDOIADataset, CONCEPTS_ORDER
 from backbones.resnet import ResNetEncoder
 from backbones.sddoiacnn import SDDOIACnn
 import time

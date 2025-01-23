@@ -1,5 +1,5 @@
 from utils.wandb_logger import *
-from datasets.utils.base_dataset import BaseDataset
+from task_datasets.utils.base_dataset import BaseDataset
 from models.mnistdpl import MnistDPL
 
 import torch

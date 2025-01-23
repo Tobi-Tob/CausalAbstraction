@@ -1,5 +1,5 @@
-from datasets.utils.base_dataset import BaseDataset, get_loader
-from datasets.utils.clip_mnst_creation import load_2MNIST
+from task_datasets.utils.base_dataset import BaseDataset, get_loader
+from task_datasets.utils.clip_mnst_creation import load_2MNIST
 from backbones.identity import Identity
 from backbones.addmnist_joint import MNISTPairsEncoder, MNISTPairsDecoder
 from backbones.addmnist_single import MNISTSingleEncoder

@@ -1,13 +1,12 @@
 from argparse import Namespace
-from datasets.utils.base_dataset import BaseDataset, MNMATH_get_loader
-from datasets.utils.mnmath_creation import MNMATHDataset
-from backbones.cnnnosharing import CBMNoSharing, MNMNISTCNN
-from backbones.addmnist_single import MNISTSingleEncoder
+from task_datasets.utils.base_dataset import BaseDataset, XOR_get_loader
+from task_datasets.utils.xor_creation import XORDataset
+from backbones.cnnnosharing import CBMNoSharing, MNISTLCNN
 import time
 
 
-class MNMATH(BaseDataset):
-    NAME = "mnmath"
+class MNLOGIC(BaseDataset):
+    NAME = "xor"
 
     def __init__(self, args: Namespace) -> None:
         super().__init__(args)
@@ -16,23 +15,23 @@ class MNMATH(BaseDataset):
     def get_data_loaders(self):
         start = time.time()
 
-        self.dataset_train = MNMATHDataset(
-            base_path="data/mnmath",
+        self.dataset_train = XORDataset(
+            base_path="data/mnlogic",
             split="train",
             c_sup=self.args.c_sup,
             which_c=self.args.which_c,
         )
 
-        self.dataset_val = MNMATHDataset(
-            base_path="data/mnmath",
+        self.dataset_val = XORDataset(
+            base_path="data/mnlogic",
             split="val",
         )
-        self.dataset_test = MNMATHDataset(
-            base_path="data/mnmath",
+        self.dataset_test = XORDataset(
+            base_path="data/mnlogic",
             split="test",
         )
-        self.dataset_ood = MNMATHDataset(
-            base_path="data/mnmath",
+        self.dataset_ood = XORDataset(
+            base_path="data/mnlogic",
             split="ood",
         )
 
@@ -47,16 +46,16 @@ class MNMATH(BaseDataset):
         print(" len test:", len(self.dataset_test))
 
         keep_order = True if self.return_embeddings else False
-        self.train_loader = MNMATH_get_loader(
+        self.train_loader = XOR_get_loader(
             self.dataset_train, self.args.batch_size, val_test=keep_order
         )
-        self.val_loader = MNMATH_get_loader(
+        self.val_loader = XOR_get_loader(
             self.dataset_val, self.args.batch_size, val_test=True
         )
-        self.test_loader = MNMATH_get_loader(
+        self.test_loader = XOR_get_loader(
             self.dataset_test, self.args.batch_size, val_test=True
         )
-        self.ood_loader = MNMATH_get_loader(
+        self.ood_loader = XOR_get_loader(
             self.dataset_ood, self.args.batch_size, val_test=True
         )
 
@@ -64,11 +63,8 @@ class MNMATH(BaseDataset):
 
     def get_backbone(self):
         if self.args.backbone == "neural":
-            return MNMNISTCNN(num_images=8, num_classes=2), None
-
-        if self.args.task == "mnmath":
-            return MNISTSingleEncoder(), None # IndividualMNISTCNN(10), None
-        return CBMNoSharing(num_images=8, nout=10), None
+            return MNISTLCNN(), None
+        return CBMNoSharing(num_images=4, nout=2), None
 
     def get_split(self):
         return 4, ()
@@ -85,14 +81,3 @@ class MNMATH(BaseDataset):
         print("Validation samples", len(self.dataset_val))
         print("Test samples", len(self.dataset_test))
         print("Test OOD samples", len(self.dataset_ood))
-
-if __name__ == "__main__":
-    dataset = MNMATH()
-
-    for batch_idx, data in enumerate(dataset.train_loader):
-        images, labels, concepts = data
-
-        print(images[0].shape)
-        print(labels[0])
-        print(concepts[0])
-        quit()

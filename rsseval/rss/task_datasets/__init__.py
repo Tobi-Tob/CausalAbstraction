@@ -7,14 +7,14 @@ from argparse import Namespace
 def get_all_datasets():
     return [
         data.split(".")[0]
-        for data in os.listdir("datasets")
+        for data in os.listdir("task_datasets")
         if not data.find("__") > -1 and "py" in data
     ]
 
 
 NAMES = {}
 for dataset in get_all_datasets():
-    dat = importlib.import_module("datasets." + dataset)
+    dat = importlib.import_module("task_datasets." + dataset)
 
     dataset_classes_name = [
         x

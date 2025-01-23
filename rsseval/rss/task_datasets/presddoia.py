@@ -1,7 +1,7 @@
 from argparse import Namespace
-from datasets.utils.base_dataset import BaseDataset, SDDOIA_get_loader
-from datasets.utils.sddoia_creation import CONCEPTS_ORDER
-from datasets.utils.presddoia_creation import PreSDDOIADataset
+from task_datasets.utils.base_dataset import BaseDataset, SDDOIA_get_loader
+from task_datasets.utils.sddoia_creation import CONCEPTS_ORDER
+from task_datasets.utils.presddoia_creation import PreSDDOIADataset
 from backbones.sddoia_mlp import SDDOIALinear
 from backbones.presddoiacnn import PreSDDOIAMlp
 import time

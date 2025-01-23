@@ -1,5 +1,5 @@
-from datasets.utils.base_dataset import BaseDataset, KAND_get_loader
-from datasets.utils.kand_creation import PreKAND_Dataset
+from task_datasets.utils.base_dataset import BaseDataset, KAND_get_loader
+from task_datasets.utils.kand_creation import PreKAND_Dataset
 from backbones.simple_encoder import SimpleMLP
 from backbones.disent_encoder_decoder import DecoderConv64
 import time
