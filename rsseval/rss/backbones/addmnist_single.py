@@ -4,6 +4,17 @@ from backbones.base.ops import *
 
 
 class MNISTSingleEncoder(nn.Module):
+    """
+    Processes just one single image
+    Input (1, 28, 28) --> Conv (32 filters, stride=2) --> ReLU --> (32, 14, 14)
+          (32, 14, 14)--> Conv (64 filters, stride=2) --> ReLU --> (64, 7, 7)
+          (64, 7, 7)  --> Conv (128 filters, stride=2) --> ReLU --> (128, 3, 3)
+          (128, 3, 3) --> Flattened to (1152)
+
+          FC Layer (c): (c_latent_dim)
+          FC Layer (mu): (c_dim * latent_dim)
+          FC Layer (logvar): (c_dim * latent_dim)
+    """
     def __init__(
         self, img_channels=1, hidden_channels=32, c_dim=10, latent_dim=16, dropout=0.5
     ):

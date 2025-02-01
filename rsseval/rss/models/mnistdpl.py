@@ -55,7 +55,7 @@ class MnistDPL(DeepProblogModel):
             None: This function does not return a value.
         """
         super(MnistDPL, self).__init__(
-            encoder=encoder,
+            encoder=encoder,  # joint or disjoint architecture is selected here
             model_dict=model_dict,
             n_facts=n_facts,
             nr_classes=nr_classes,

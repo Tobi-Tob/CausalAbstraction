@@ -38,6 +38,8 @@ def train_mlp(config, dataset_path: str, save_model_dir: str):
     X = torch.stack([example['input_ids'] for example in dataset])
     y = torch.stack([example['labels'] for example in dataset])
 
+    embedding_dim = X.shape[-1] // 4
+
     train_ds = Dataset.from_dict({
         "labels": [torch.FloatTensor([0, 1]) if i == 1 else torch.FloatTensor([1, 0]) for i in y],
         "inputs_embeds": X,
@@ -71,7 +73,7 @@ def train_mlp(config, dataset_path: str, save_model_dir: str):
     trainer.train()
 
     # Save the model
-    model_path = os.path.join(save_model_dir, f"mlp_dim{config['h_dim']/4}.pt")
+    model_path = os.path.join(save_model_dir, f"mlp_dim{embedding_dim}.pt")
     print(f"Saved model to {model_path}")
     torch.save(mlp, model_path)
 
@@ -159,7 +161,7 @@ def distributed_alignment_search(target_model_path: str, object_dim: int, counte
     # Training parameters for the rotation matrix
     epochs = 10
     lr = 0.001
-    batch_size = 6400
+    batch_size = 1024
     gradient_accumulation_steps = 1
     total_step = 0
 
@@ -283,7 +285,7 @@ def distributed_alignment_search(target_model_path: str, object_dim: int, counte
 
 
 if __name__ == "__main__":
-    object_dim = 2
+    object_dim = 4
 
     mlp_args = dict(
         num_classes=2,
@@ -296,9 +298,12 @@ if __name__ == "__main__":
         pdrop=0.0,
 
     )
-    # train_mlp(mlp_args, dataset_path="data/equality_task_data_dim2.pt", save_model_dir="trained_models")
+    # train_mlp(mlp_args, dataset_path="data/equality_task_data_dim4.pt", save_model_dir="trained_models")
 
-    # test_mlp(model_path='trained_models/mlp_dim2.pt', testdata_path="data/equality_task_data_dim2.pt")
+    # test_mlp(model_path='trained_models/mlp_dim4.pt', testdata_path="data/equality_task_data_dim4.pt")
 
-    distributed_alignment_search(target_model_path='trained_models/mlp_dim2.pt', object_dim=object_dim,
-                                 counterfactuals_path="data/equality_task_counterfactual_data_dim2.pt")
+    distributed_alignment_search(target_model_path='trained_models/mlp_dim4.pt', object_dim=object_dim,
+                                 counterfactuals_path="data/equality_task_counterfactual_data_dim4.pt")
+
+    # TODO Safe the best alignment (rotation parameters) found during training when evaluation on the total training set
+    # TODO Test the rotated and aligned model on counterfactual test data

@@ -4,6 +4,15 @@ import torch.nn.functional as F
 
 
 class DisjointMNISTAdditionCNN(nn.Module):
+    """
+    Processes to images after independently and concatenates the embeddings to run through FNN and return the sum as 19 class output
+    Input (1, 28, 28) --> Conv1 (16 filters) --> ReLU --> Max Pooling (2x2) --> (16, 14, 14)
+          (16, 14, 14)--> Conv2 (32 filters) --> ReLU --> Max Pooling (2x2) --> (32, 7, 7)
+          (32, 7, 7)  --> Flattened to (1568)
+
+          (1568 * 2) concatenated in classify() --> FC1 (128 units) --> FC2 (64 units) --> FC3 (19 units)
+          (19 units) --> Softmax (output probabilities)
+    """
     def __init__(self, n_images):
         super(DisjointMNISTAdditionCNN, self).__init__()
         self.conv1 = nn.Conv2d(1, 16, kernel_size=3, stride=1, padding=1)
@@ -24,11 +33,19 @@ class DisjointMNISTAdditionCNN(nn.Module):
         return x
 
     def _concatenate_embeddings(self, emb_list):
+        # Returns: torch.Tensor: A single tensor containing all embeddings concatenated along the feature dimension.
         assert len(emb_list) == self.n_images
 
         return torch.concatenate(emb_list, dim=1)
 
     def classify(self, emb_list):
+        """
+        Args:
+            emb_list: List[torch.Tensor]: A list of tensors containing embeddings for each image.
+
+        Returns:
+            torch.Tensor: A tensor containing the output probabilities for each class.
+        """
         x = self._concatenate_embeddings(emb_list)
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))

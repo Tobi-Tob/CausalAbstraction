@@ -29,18 +29,18 @@ class ADDMNIST(BaseDataset):
         return self.train_loader, self.val_loader, self.test_loader
 
     def get_backbone(self):
-        if self.args.joint:
-            if not self.args.splitted:
+        if self.args.joint:  # joint architecture selected
+            if not self.args.splitted:  # WHATS that?
                 return MNISTPairsEncoder(), MNISTPairsDecoder()
             else:
                 if self.args.backbone == "neural":
                     return MNISTAdditionCNN(), None
-                return MNISTRepeatedEncoder(), MNISTPairsDecoder()
-        else:
+                return MNISTRepeatedEncoder(), MNISTPairsDecoder()  # args.backbone == conceptizer?
+        else:  # disjoint architecture selected
             if self.args.backbone == "neural":
                 return DisjointMNISTAdditionCNN(n_images=self.get_split()[0]), None
 
-            return MNISTSingleEncoder(), MNISTPairsDecoder()
+            return MNISTSingleEncoder(), MNISTPairsDecoder()  # args.backbone == conceptizer?
 
     def get_split(self):
         if self.args.joint:

@@ -5,6 +5,17 @@ from backbones.base.ops import *
 
 
 class MNISTPairsEncoder(nn.Module):
+    """
+    Processes to images stacked together as pair
+    Input (1, 28, 2*28)--> Conv (32 filters, stride=2) --> ReLU --> (32, 14, 28)
+          (32, 14, 28) --> Conv (64 filters, stride=2) --> ReLU --> (64, 7, 14)
+          (64, 7, 14)  --> Conv (128 filters, stride=2) --> ReLU --> (128, 2 or 3?, 7)
+          (128, 2, 7)  --> Flattened to (1292)
+
+          FC Layer (c): (c_dim)
+          FC Layer (mu): (latent_dim)
+          FC Layer (logvar): (latent_dim)
+    """
     def __init__(
         self, img_channels=1, hidden_channels=32, c_dim=20, latent_dim=20, dropout=0.5
     ):

@@ -5,6 +5,17 @@ from backbones.base.ops import *
 
 
 class MNISTRepeatedEncoder(nn.Module):
+    """
+        Processes 2 images with 2 different repeated encoder architectures and stacks c, mu and logvar at the end
+        Input (1, 28, 28)--> Conv (32 filters, stride=2) --> ReLU --> (32, 14, 14)
+              (32, 14, 14) --> Conv (64 filters, stride=2) --> ReLU --> (64, 7, 7)
+              (64, 7, 7)  --> Conv (128 filters, stride=2) --> ReLU --> (128, 3, 3)
+              (128, 3, 3)  --> Flattened to (1152)
+
+              FC Layer (c): (2*c_dim)
+              FC Layer (mu): (2*latent_dim)
+              FC Layer (logvar): (2*latent_dim)
+        """
     def __init__(
         self, img_channels=1, hidden_channels=32, c_dim=10, latent_dim=10, dropout=0.5
     ):
