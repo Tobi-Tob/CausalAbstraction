@@ -285,7 +285,7 @@ def distributed_alignment_search(target_model_path: str, object_dim: int, counte
 
 
 if __name__ == "__main__":
-    object_dim = 4
+    object_dim = 2
 
     mlp_args = dict(
         num_classes=2,
@@ -298,12 +298,12 @@ if __name__ == "__main__":
         pdrop=0.0,
 
     )
-    # train_mlp(mlp_args, dataset_path="data/equality_task_data_dim4.pt", save_model_dir="trained_models")
+    # train_mlp(mlp_args, dataset_path="data/equality_task_small_data_dim2.pt", save_model_dir="trained_models")
 
     # test_mlp(model_path='trained_models/mlp_dim4.pt', testdata_path="data/equality_task_data_dim4.pt")
 
-    distributed_alignment_search(target_model_path='trained_models/mlp_dim4.pt', object_dim=object_dim,
-                                 counterfactuals_path="data/equality_task_counterfactual_data_dim4.pt")
+    distributed_alignment_search(target_model_path='trained_models/mlp_dim2.pt', object_dim=object_dim,
+                                 counterfactuals_path="data/equality_task_counterfactual_small_data_dim2.pt")
 
     # TODO Safe the best alignment (rotation parameters) found during training when evaluation on the total training set
     # TODO Test the rotated and aligned model on counterfactual test data
