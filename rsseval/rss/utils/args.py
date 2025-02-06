@@ -183,6 +183,11 @@ def add_experiment_args(parser: ArgumentParser) -> None:
         action="store_true",
         help="Whether to employ BOIA OOD-knowledge (Ambulance) only for DPL",
     )
+    parser.add_argument(
+        "--DAS",
+        action="store_true",
+        help="Run Distributed Alignment Search (DAS)",
+    )
 
 
 def add_management_args(parser: ArgumentParser) -> None:

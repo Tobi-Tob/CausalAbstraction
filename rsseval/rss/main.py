@@ -1,5 +1,8 @@
+# ================================
 # This is the main module
-# It provides an overview of the program purpose and functionality.
+# This module initializes the environment, parses arguments,
+# and controls the overall flow for training, testing, or tuning.
+# ================================
 
 import sys, os
 import torch
@@ -26,6 +29,7 @@ conf_path = os.getcwd() + "."
 sys.path.append(conf_path)
 
 
+# Define a custom exception to handle external termination signals (e.g., SIGINT, SIGTERM).
 class TerminationError(Exception):
     """Error raised when a termination signal is received"""
 
@@ -41,6 +45,7 @@ class TerminationError(Exception):
         super().__init__("External signal received: forcing termination")
 
 
+# Signal handler: Raises TerminationError upon receiving termination signals.
 def __handle_signal(signum: int, frame):
     """For program termination on cluster
 
@@ -57,6 +62,7 @@ def __handle_signal(signum: int, frame):
     raise TerminationError()
 
 
+# Setup function to register signal handlers for graceful termination.
 def register_termination_handlers():
     """Makes this process catch SIGINT and SIGTERM. When the process receives such a signal after this call, a TerminationError is raised.
 
@@ -68,6 +74,7 @@ def register_termination_handlers():
     signal.signal(signal.SIGTERM, __handle_signal)
 
 
+# Parse command-line arguments and perform initial configuration (e.g., random seed setup).
 def parse_args():
     """Parse command line arguments
 
@@ -111,6 +118,8 @@ def parse_args():
     return args
 
 
+# Function for hyperparameter tuning using WandB sweeps.
+# Configures the search space and launches training runs for each sweep iteration.
 def tune(args):
     """
     This function performs a hyper-parameter tuning of the model using a WandB sweep.
@@ -166,6 +175,8 @@ def tune(args):
     wandb.agent(sweep_id, function=train_conf, count=args.count)
 
 
+# Main function: Orchestrates data loading, model initialization, training/testing,
+# and post-training evaluation or probing based on the parsed arguments.
 def main(args):
     """Main function. Provides functionalities for training, testing and active learning.
 
@@ -183,8 +194,8 @@ def main(args):
         dataset = get_dataset(args)
 
         # Load dataset, model, loss, and optimizer
-        encoder, decoder = dataset.get_backbone()
-        n_images, c_split = dataset.get_split()
+        encoder, decoder = dataset.get_backbone()  # TL: joint or disjoint
+        n_images, c_split = dataset.get_split()  # Based on args.joint True or False: n_images= 1 or 2 c_split= (10, 10) or (10,)
         model = get_model(args, encoder, decoder, n_images, c_split)
         loss = model.get_loss(args)
         model.start_optim(args)
@@ -204,7 +215,7 @@ def main(args):
         # perform posthoc evaluation/ cl training/ joint training
         print("    Chosen device:", model.device)
 
-        if args.preprocess:
+        if args.preprocess:  # TODO what does this do?
             preprocess(model, dataset, args)
             print("\n ### Closing ###")
             quit()
@@ -213,6 +224,14 @@ def main(args):
             probe(model, dataset, args)
         elif args.posthoc:
             test(model, dataset, args)  # test the model if post-hoc is passed
+
+        elif args.DAS:  # Apply Distributed Alignment Search
+            if args.model == "mnistdpl":
+                from DAS import DAS_MnistDPL
+                DAS_MnistDPL(target_model=model, state_dict_path=args.checkin)
+            else:
+                raise NotImplementedError(f'Distributed Alignment Search (DAS) is not implemented for {args.model}')
+
         else:
             train(model, dataset, loss, args)  # train the model otherwise
             save_model(model, args)  # save the model parameters
@@ -224,10 +243,12 @@ def main(args):
 
 if __name__ == "__main__":
     args = parse_args()
-
     main(args)
 
 """
+Example call:
+python main.py --model mnistdpl --dataset addmnist --task addition --backbone conceptizer --n_epochs 2 --validate --wandb tobi-tob-tu-darmstadt
+
 General Arguments
 
     --model
@@ -246,6 +267,9 @@ General Arguments
         mnmath (Likely a dataset involving mathematical tasks, such as addition or subtraction using MNIST digits)
         restrictedmnist (???)
         xor (A dataset for learning the XOR logical operation, often used as a toy problem in explainability research)
+        
+    --joint
+        Description: A flag that indicates whether joint training is enabled. Uses a fully connected NN to process the digits together.
 
     --load_best_args
         Description: Loads predefined optimal arguments for the method, dataset, and memory buffer.
@@ -293,6 +317,10 @@ General Arguments
         Description: Preprocesses the dataset.
         Datatype: flag (no value required)
         Example: --preprocess
+    
+    --DAS
+        Description: Run Distributed Alignment Search (DAS)
+        Datatype: flag (no value required)
 
 Training Arguments
 

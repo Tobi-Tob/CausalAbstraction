@@ -31,9 +31,9 @@ class MnistDPL(DeepProblogModel):
 
     def __init__(
         self,
-        encoder,
+        encoder,  # gets MNISTSingleEncoder
         n_images=2,
-        c_split=(),
+        c_split=(),  # gets (10,)
         args=None,
         model_dict=None,
         n_facts=20,
@@ -60,7 +60,17 @@ class MnistDPL(DeepProblogModel):
             n_facts=n_facts,
             nr_classes=nr_classes,
         )
-
+        """
+        encoder MNISTSingleEncoder(
+            (enc_block_1): Conv2d(1, 32, kernel_size=(4, 4), stride=(2, 2), padding=(1, 1))
+            (enc_block_2): Conv2d(32, 64, kernel_size=(4, 4), stride=(2, 2), padding=(1, 1))
+            (enc_block_3): Conv2d(64, 128, kernel_size=(4, 4), stride=(2, 2), padding=(1, 1))
+            (flatten): Flatten()
+            (dense_logvar): Linear(in_features=1152, out_features=160, bias=True)
+            (dense_mu): Linear(in_features=1152, out_features=160, bias=True)
+            (dense_c): Linear(in_features=1152, out_features=10, bias=True)
+            (dropout): Dropout(p=0.5, inplace=False))
+        """
         # how many images and explicit split of concepts
         self.n_images = n_images
         self.c_split = c_split
@@ -98,6 +108,7 @@ class MnistDPL(DeepProblogModel):
         Returns:
             out_dict: output dict
         """
+
         # Image encoding
         cs = []
         xs = torch.split(x, x.size(-1) // self.n_images, dim=-1)
@@ -106,14 +117,15 @@ class MnistDPL(DeepProblogModel):
             cs.append(lc)
         clen = len(cs[0].shape)
 
-        cs = torch.stack(cs, dim=1) if clen == 2 else torch.cat(cs, dim=1)
-
-        # normalize concept preditions
-        pCs = self.normalize_concepts(cs)
+        cs = torch.stack(cs, dim=1) if clen == 2 else torch.cat(cs, dim=1)  # cs=torch.Size([64, 2, 10])
+        # normalize concept predictions pCs = torch.Size([64, 2, 10])
+        pCs = self.normalize_concepts(cs)  # TODO concept for image 1 and 2 combined?
 
         # Problog inference to compute worlds and query probability distributions
         py, worlds_prob = self.problog_inference(pCs)
-
+        # CS=torch.Size([64, 2, 10])
+        # YS=torch.Size([64, 19])
+        # pCS=torch.Size([64, 2, 10])
         return {"CS": cs, "YS": py, "pCS": pCs}
 
     def problog_inference(self, pCs, query=None):
@@ -128,7 +140,6 @@ class MnistDPL(DeepProblogModel):
             query_prob: query probability
             worlds_prob: worlds probability
         """
-
         # Extract first and second digit probability
         prob_digit1, prob_digit2 = pCs[:, 0, :], pCs[:, 1, :]
 
@@ -155,6 +166,8 @@ class MnistDPL(DeepProblogModel):
             Z = torch.sum(query_prob, dim=-1, keepdim=True)
         query_prob = query_prob / Z
 
+        # query_prob=torch.Size([64, 19])
+        # worlds_prob=torch.Size([64, 100])
         return query_prob, worlds_prob
 
     def compute_query(self, query, worlds_prob):
@@ -171,7 +184,7 @@ class MnistDPL(DeepProblogModel):
         # Select the column of w_q matrix corresponding to the current query
         w_q = self.w_q[:, query]
         # Compute query probability by summing the probability of all the worlds where the query is true
-        query_prob = torch.sum(w_q * worlds_prob, dim=1, keepdim=True)
+        query_prob = torch.sum(w_q * worlds_prob, dim=1, keepdim=True)  # query_prob=torch.Size([64, 1])
         return query_prob
 
     def normalize_concepts(self, z, split=2):
