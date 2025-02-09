@@ -114,19 +114,27 @@ class MnistDPL(DeepProblogModel):
         xs = torch.split(x, x.size(-1) // self.n_images, dim=-1)
         for i in range(self.n_images):
             lc, mu, logvar = self.encoder(xs[i])  # sizes are ok
+            # lc: Latent concept representation extracted from the image.
+            # mu: Mean of the latent variable distribution.
+            # logvar: Log-variance of the latent variable distribution.
             cs.append(lc)
         clen = len(cs[0].shape)
 
         cs = torch.stack(cs, dim=1) if clen == 2 else torch.cat(cs, dim=1)  # cs=torch.Size([64, 2, 10])
         # normalize concept predictions pCs = torch.Size([64, 2, 10])
-        pCs = self.normalize_concepts(cs)  # TODO concept for image 1 and 2 combined?
+        pCs = self.normalize_concepts(cs)
+        # applies softmax on cs to ensure they represent probability distributions over the possible digit values (0-9)
 
         # Problog inference to compute worlds and query probability distributions
         py, worlds_prob = self.problog_inference(pCs)
-        # CS=torch.Size([64, 2, 10])
-        # YS=torch.Size([64, 19])
-        # pCS=torch.Size([64, 2, 10])
+        # worlds_prob contains the probability distribution over all possible worlds.
+        # Each world represents a specific combination of digit values (e.g., 3 + 5, 7 + 2, etc.).
+        # py is a marginal probability distribution over the possible sums (or queries).
+        # It is computed from worlds_prob by summing over all the worlds where the query is true.
         return {"CS": cs, "YS": py, "pCS": pCs}
+        # CS The extracted raw concept representations (before normalization) - torch.Size([64, 2, 10])
+        # YS The final probability distribution over possible sums - torch.Size([64, 19])
+        # pCS The normalized concept probabilities, used for inference - torch.Size([64, 2, 10])
 
     def problog_inference(self, pCs, query=None):
         """Performs ProbLog inference to retrieve the worlds probability distribution P(w). Works with two encoded bits.

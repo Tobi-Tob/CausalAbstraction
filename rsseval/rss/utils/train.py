@@ -104,6 +104,7 @@ def plot_confusion_matrix(
 def plot_multilabel_confusion_matrix(
     y_true, y_pred, class_names, title, save_path=None
 ):
+    # Generates and plots a multilabel confusion matrix for different class labels
     y_true_categories = convert_to_categories(y_true.astype(int))
     y_pred_categories = convert_to_categories(y_pred.astype(int))
 
@@ -154,7 +155,7 @@ def plot_multilabel_confusion_matrix(
 
 
 def plot_actions_confusion_matrix(c_true, c_pred, title, save_path=None):
-
+    # Plots confusion matrices for different action categories (e.g., forward, stop, left, right)
     # Define scenarios and corresponding labels
     scenarios = {
         "forward": [slice(0, 3), slice(0, 3)],
@@ -205,6 +206,7 @@ def plot_actions_confusion_matrix(c_true, c_pred, title, save_path=None):
 
 
 def save_embeddings(dataset: BaseDataset, device, name):
+    # Extracts and saves model embeddings for different dataset partitions (train, val, test, ood)
     dataset.return_embeddings = True
     dataset.args.batch_size = 1  # 1 as batch size
     train_loader, val_loader, test_loader = dataset.get_data_loaders()
@@ -247,6 +249,9 @@ def save_embeddings(dataset: BaseDataset, device, name):
 
 
 def save_predictions_to_csv(model, test_set, csv_name, dataset):
+    """
+    Runs inference on a test set and saves model predictions to a CSV file
+    """
     model.eval()
 
     ys, y_true, cs, cs_true = None, None, None, None
@@ -299,7 +304,8 @@ def save_predictions_to_csv(model, test_set, csv_name, dataset):
 
 
 def train(model: MnistDPL, dataset: BaseDataset, _loss: ADDMNIST_DPL, args):
-    """TRAINING
+    """TRAINING:
+    Main training loop for the MnistDPL model with dataset and loss function
 
     Args:
         model (MnistDPL): network
@@ -310,13 +316,11 @@ def train(model: MnistDPL, dataset: BaseDataset, _loss: ADDMNIST_DPL, args):
     Returns:
         None: This function does not return a value.
     """
-
-    # name
+    # Initialize training session: Define file name for saving predictions and set up the best F1 score tracker.
     csv_name = f"{args.dataset}-{args.model}-lr-{args.lr}.csv"
-
-    # best f1
     best_f1 = 0.0
 
+    # Construct the model saving path and adjust naming based on model type and dataset configuration.
     to_add = ""
     if args.model in ["kandcbm", "sddoiacbm", "boiacbm", "mnistcbm"]:
         to_add = "_partial_sup"
@@ -328,7 +332,6 @@ def train(model: MnistDPL, dataset: BaseDataset, _loss: ADDMNIST_DPL, args):
 
     # save embeddings variable
     save_embeddings_flag = False
-
     if save_embeddings_flag:
         save_embeddings(dataset, model.device, "resnet")
         print("### Done saving the embeddings ###")
@@ -340,13 +343,16 @@ def train(model: MnistDPL, dataset: BaseDataset, _loss: ADDMNIST_DPL, args):
     if args.dataset == "shortmnist":
         model = model.float()
 
+    # Load data: Obtain train, validation, and test loaders from the dataset and display dataset statistics.
     train_loader, val_loader, test_loader = dataset.get_data_loaders()
     dataset.print_stats()
+    # Initialize schedulers: Set up the exponential learning rate decay and an optional warmup scheduler.
     scheduler = torch.optim.lr_scheduler.ExponentialLR(model.opt, args.exp_decay)
     w_scheduler = None
     if args.warmup_steps > 0:
         w_scheduler = GradualWarmupScheduler(model.opt, 1.0, args.warmup_steps)
 
+    # Initialize WandB logging: Start a new WandB run for experiment tracking if enabled.
     if not args.tuning and args.wandb is not None:
         fprint("\n---wandb on\n")
         wandb.init(
@@ -367,11 +373,15 @@ def train(model: MnistDPL, dataset: BaseDataset, _loss: ADDMNIST_DPL, args):
     if args.model == "kandltn" and args.c_sup_ltn and args.dataset == "minikandinsky":
         conc_sup = dataset.get_sup()
 
+    # Begin training loop: Iterate over epochs, set the model to training mode, and initialize batch-level prediction accumulators.
     for epoch in range(args.n_epochs):
+
+        """TRAINING"""
         model.train()
 
         ys, y_true, cs, cs_true = None, None, None, None
 
+        # Process batch: Transfer data to the device, optionally perform concept supervision sampling, and execute the forward pass.
         for i, data in enumerate(train_loader):
             images, labels, concepts = data
             images, labels, concepts = (
@@ -396,6 +406,7 @@ def train(model: MnistDPL, dataset: BaseDataset, _loss: ADDMNIST_DPL, args):
 
             out_dict = model(images)
             out_dict.update({"LABELS": labels, "CONCEPTS": concepts})
+            # out_dict{"CS", "YS", "pCS", "LABELS", "CONCEPTS"}
 
             # out_dict.update({"INPUTS": images, "LABELS": labels, "CONCEPTS": concepts})
 
@@ -405,6 +416,7 @@ def train(model: MnistDPL, dataset: BaseDataset, _loss: ADDMNIST_DPL, args):
             model.opt.zero_grad()
             loss, losses = _loss(out_dict, args)
 
+            # Backpropagation: Compute loss, perform backpropagation, and update model weights.
             loss.backward()
             model.opt.step()
 
@@ -425,6 +437,7 @@ def train(model: MnistDPL, dataset: BaseDataset, _loss: ADDMNIST_DPL, args):
             if i % 10 == 0:
                 progress_bar(i, len(train_loader) - 9, epoch, loss.item())
 
+        # Compute epoch-level predictions: Derive predicted labels from accumulated outputs and calculate training accuracy.
         if args.task == "mnmath":
             y_pred = (ys > 0.5).to(torch.long)
         else:
@@ -449,7 +462,7 @@ def train(model: MnistDPL, dataset: BaseDataset, _loss: ADDMNIST_DPL, args):
                     / len(y_pred.flatten())
                     * 100
                 )
-            else: 
+            else:
                 acc = (
                     (y_pred.detach().cpu() == y_true.detach().cpu()).sum().item()
                     / len(y_true)
@@ -463,6 +476,7 @@ def train(model: MnistDPL, dataset: BaseDataset, _loss: ADDMNIST_DPL, args):
                 len(y_true),
             )
 
+        """EVALUATION"""
         model.eval()
         tloss, cacc, yacc, f1 = evaluate_metrics(model, val_loader, args)
 
@@ -482,6 +496,7 @@ def train(model: MnistDPL, dataset: BaseDataset, _loss: ADDMNIST_DPL, args):
         ### LOGGING ###
         fprint("  ACC C", cacc, "  ACC Y", yacc, "F1 Y", f1)
 
+        # Checkpointing: If the current epoch yields a higher F1 score, save the model as the best performing checkpoint.
         if not args.tuning and f1 > best_f1:
             print("Saving...")
             # Update best F1 score
@@ -500,6 +515,7 @@ def train(model: MnistDPL, dataset: BaseDataset, _loss: ADDMNIST_DPL, args):
                 lr=float(scheduler.get_last_lr()[0]),
             )
 
+    # Final evaluation and logging: Perform additional evaluations (confusion matrices, accuracy, entropy) and log the results.
     if args.dataset in ["clipshortmnist", "shortmnist"]:
         pass
     elif not args.tuning:
@@ -563,11 +579,11 @@ def train(model: MnistDPL, dataset: BaseDataset, _loss: ADDMNIST_DPL, args):
 
             for key, value in cfs.items():
                 print("Concept collapse", key, 1 - compute_coverage(value))
-        
+
         elif args.task == "mnmath":
             y_labels = ["first", "second"]
             concept_labels = [
-                ["{i}" for i in range(10) for _ in range(4)] 
+                ["{i}" for i in range(10) for _ in range(4)]
             ]
             plot_multilabel_confusion_matrix(
                 y_true, y_pred, y_labels, "Labels", save_path="labels.png"
