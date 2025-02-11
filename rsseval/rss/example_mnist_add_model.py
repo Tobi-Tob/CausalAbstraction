@@ -338,7 +338,7 @@ def distributed_alignment_search(target_model: nn.Module, counterfactual_data_pa
                     batch[k] = v.to("cpu")
 
             # Call the intervenable model.
-            if batch["intervention_id"][0] == 2:  # TODO check if it is ok that for the whole batch the same intervention_id is assumed
+            if batch["intervention_id"][0] == 2:  # Same intervention_id for the whole batch is assumed
                 _, counterfactual_outputs = intervenable(
                     {"input_ids": batch["input_ids"]},
                     [
@@ -346,7 +346,7 @@ def distributed_alignment_search(target_model: nn.Module, counterfactual_data_pa
                         {"inputs_embeds": batch["source_input_ids"][:, 1]},
                     ],
                     {
-                        "sources->base": (  # TODO why is this always 0?
+                        "sources->base": (  # why is this always 0?
                             [[[0]] * batch_size, [[0]] * batch_size],  # source position 0 into base position 0
                             [[[0]] * batch_size, [[0]] * batch_size],
                         )
@@ -374,7 +374,7 @@ def distributed_alignment_search(target_model: nn.Module, counterfactual_data_pa
             elif batch["intervention_id"][0] == 1:
                 _, counterfactual_outputs = intervenable(
                     {"input_ids": batch["input_ids"]},
-                    [None, {"inputs_embeds": batch["source_input_ids"][:, 0]}],  # TODO doesnt it need to be [:, 1] here?
+                    [None, {"inputs_embeds": batch["source_input_ids"][:, 0]}],
                     {
                         "sources->base": (
                             [None, [[0]] * batch_size],

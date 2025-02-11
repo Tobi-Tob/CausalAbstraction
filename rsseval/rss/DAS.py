@@ -7,6 +7,8 @@ from tqdm import tqdm, trange
 from torch.utils.data import Dataset, DataLoader
 import pyvene
 from transformers.modeling_outputs import SequenceClassifierOutput
+
+from backbones.addmnist_single import MNISTSingleEncoder
 from task_datasets.utils.mnist_creation import load_2MNIST
 from pyvene import (
     IntervenableModel,
@@ -20,35 +22,56 @@ from models.mnistdpl import MnistDPL
 
 class WrappedMnistDPL(nn.Module):
     """
-    Wraps the MnistDPL to work with pyvene.
+    The WrappedMnistDPL class wraps an instance of the MnistDPL model to make it compatible with pyvene’s intervention framework.
+    ConceptExtractionBlock (Nested Class):
+    - Acts as a wrapper around the encoder portion of the model.
+    - Since pyvene can only “hook” into nn.Module objects, reimplementing this part allows the framework to access and intervene
+      on the intermediate (concept) representations.
+    Pyvene Configuration:
+    - The wrapper sets up a simple configuration and registers a mapping in type_to_module_mapping and type_to_dimension_mapping.
+    - Pyvene knows which layer to intervene on, the target is the concept_layer output of the ConceptExtractionBlock.
     """
-    class FakeMLPBlock(nn.Module):
+
+    class ConceptExtractionBlock(nn.Module):
         """
-        A fake block that simply returns the concept layer from the wrapped model.
-        This is the hidden state that will be rotated by DAS.
+        A wrapper block that reimplements the behavior of the wrapped model for the concept extraction part.
+        This block is needed to make the intermediate computations accessible, as pyvene can only hock onto nn.Modules.
         """
 
-        def __init__(self, model):
+        def __init__(self, encoder, n_images):
             super().__init__()
-            self.model = model
+            self.encoder = encoder
+            self.n_images = n_images
 
-        def forward(self, cs):
-            # Update the hidden state
-            self.model.h = cs
-            # Get the stored concept layer (possible after intervention)
-            h = self.model.h  # has size (batch_size, 2, 10)
-            # TODO Ensure h has the correct shape, pyvene expects: (batch_size, 1, hidden_dim)
-            return h
+        def forward(self, x):
+            """
+            Reimplementation of MnistDPL forward method to allow pyvene to interact with the desired concept layer (cs).
+            Args:
+                x: image tensor of size [bs, 1, 28, n_images x 28]
+
+            Returns: This module outputs the hidden concept layer [bs, 1, 20] that will be rotated by DAS.
+            """
+            cs = []
+            xs = torch.split(x, x.size(-1) // self.n_images, dim=-1)  # splits images into "n_images" digits
+            for i in range(self.n_images):
+                lc, _, _ = self.encoder(xs[i])  # encodes each sub image xs into its latent representation
+                cs.append(lc)
+            # cs is a list containing 2x torch.Size([bs, 1, 10])
+            concept_layer = torch.cat(cs, dim=-1)
+            # Now, concept_layer is [bs, 1, 20]
+            return concept_layer  # pyvene expects: [bs, 1, h_dim]
 
     def __init__(self, wrapped_model: MnistDPL):
         super().__init__()
         self.wrapped_model = wrapped_model
+        self.device = wrapped_model.device
+        concept_dim = self.wrapped_model.n_facts*self.wrapped_model.n_images
 
         # Pyvene expects self.config
         self.config = SimpleNamespace(
             num_classes=19,
             n_layer=2,
-            h_dim=self.wrapped_model.n_facts,
+            h_dim=concept_dim,
             pdrop=0.0,
             problem_type="classification",
             squeeze_output=True,
@@ -56,12 +79,12 @@ class WrappedMnistDPL(nn.Module):
             include_bias=False
         )
 
-        # self.h is expected as argument. Replace the hidden state with our fake block that returns the concept layer.
-        self.h = nn.ModuleList([self.FakeMLPBlock(self)])
+        # Define the layer we want pyvene to intervene on
+        self.concept_layer = self.ConceptExtractionBlock(self.wrapped_model.encoder, self.wrapped_model.n_images)
 
         # config the intervention mapping with pyvene global vars
         pyvene.type_to_module_mapping[type(self)] = {
-            "block_output": ("h[%s]", pyvene.models.constants.CONST_OUTPUT_HOOK),
+            "block_output": ("concept_layer", pyvene.models.constants.CONST_OUTPUT_HOOK),
         }
         pyvene.type_to_dimension_mapping[type(self)] = {
             "block_output": ("h_dim",),
@@ -84,34 +107,90 @@ class WrappedMnistDPL(nn.Module):
         else:
             raise ValueError("No input provided. Please supply either input_ids or inputs_embeds.")
 
-        # --- Reimplementation of MnistDPL to allow pyvene to intervene on self.h ---
-        cs = []
-        xs = torch.split(x, x.size(-1) // self.wrapped_model.n_images, dim=-1)
-        for i in range(self.wrapped_model.n_images):
-            lc, _, _ = self.wrapped_model.encoder(xs[i])  # sizes are ok
-            cs.append(lc)
-        clen = len(cs[0].shape)
+        concept_layer = self.concept_layer(x)  # returns the potentially intervened concepts
+        # Recalculate cs from concept_layer so that it is again of shape [bs, 2, 10]
+        # Since concept_layer is [bs, 1, 20] and 1*20 equals 2*10, we can reshape it.
+        cs = concept_layer.view(concept_layer.size(0), self.wrapped_model.n_images, self.wrapped_model.n_facts)
 
-        cs = torch.stack(cs, dim=1) if clen == 2 else torch.cat(cs, dim=1)
-
-        # We assign that to self.h so that pyvene can intervene on it.
-        cs_intervened = self.h[0](cs)  # TODO maybe first apply normalize_concepts()
-
-        pCs = self.wrapped_model.normalize_concepts(cs_intervened)
+        pCs = self.wrapped_model.normalize_concepts(cs)
         # applies softmax on cs to ensure they represent probability distributions over the possible digit values (0-9)
 
         # Problog inference to compute worlds and query probability distributions
         py, _ = self.wrapped_model.problog_inference(pCs)
 
         logits = py
-        # Return output in the expected format
-        if return_dict:
-            return SequenceClassifierOutput(loss=None, logits=logits, hidden_states=self.h)  # TODO is that needed?
-        else:
-            return (logits,)
+        return (logits,)
 
 
-def DAS_MnistDPL(target_model: MnistDPL, state_dict_path: str, counterfactual_data_path="data/mnist_add_counterfactual_train_data_bs100.pt"):
+def apply_intervention(intervenable, base_images, source_images, intervention_id, batch_size):
+    """
+    Helper function to apply the intervention based on the intervention_id.
+
+    Args:
+        intervenable: The intervenable model object.
+        base_images: Tensor of base images.
+        source_images: A list of tensors, one per source position.
+        intervention_id: An integer (0, 1, or 2) indicating the intervention type (Same intervention_id in the whole batch assumed!).
+        batch_size: The batch size (used for constructing mapping lists).
+
+    Returns:
+        The counterfactual outputs from the intervenable model.
+    """
+    if intervention_id == 2:
+        _, outputs = intervenable(
+            {"input_ids": base_images},
+            [
+                {"inputs_embeds": source_images[0]},
+                {"inputs_embeds": source_images[1]},
+            ],
+            {
+                "sources->base": (
+                    [[[0]] * batch_size, [[0]] * batch_size],  # source position 0 into base position 0
+                    [[[0]] * batch_size, [[0]] * batch_size],
+                )
+            },
+            subspaces=[
+                [[i for i in range(0, 10)]] * batch_size,
+                [[i for i in range(10, 20)]] * batch_size,
+            ],
+        )
+    elif intervention_id == 0:
+        _, outputs = intervenable(
+            {"input_ids": base_images},
+            [{"inputs_embeds": source_images[0]}, None],
+            {
+                "sources->base": (
+                    [[[0]] * batch_size, None],
+                    [[[0]] * batch_size, None],
+                )
+            },
+            subspaces=[
+                [[i for i in range(0, 10)]] * batch_size,
+                None,
+            ],
+        )
+    elif intervention_id == 1:
+        _, outputs = intervenable(
+            {"input_ids": base_images},
+            [None, {"inputs_embeds": source_images[0]}],
+            {
+                "sources->base": (
+                    [None, [[0]] * batch_size],
+                    [None, [[0]] * batch_size],
+                )
+            },
+            subspaces=[
+                None,
+                [[i for i in range(10, 20)]] * batch_size,
+            ],  # Or subspaces=1 to intervene only dimensions from 0 to 4 if defined subspace_partition=[[0, 4], [4, 8]] in config
+        )
+    else:
+        raise ValueError("Unknown intervention_id")
+    return outputs
+
+
+def DAS_MnistDPL(target_model: MnistDPL, state_dict_path="test_model_addmnist_mnistdpl.pth",
+                 counterfactual_data_path="data/mnist_add_counterfactual_train_data_bs100.pt"):
     """
     This method implements the Distributed Alignment Search (DAS) algorithm for MnistDPL. We want to see if the target DeepProbLog model
     implements a high-level causal abstraction model to solve the MNIST addition task.
@@ -135,6 +214,13 @@ def DAS_MnistDPL(target_model: MnistDPL, state_dict_path: str, counterfactual_da
     python main.py --DAS --model mnistdpl --dataset addmnist --task addition --backbone conceptizer --checkin test_model_addmnist_mnistdpl.pth --batch_size 100
     """
 
+    # ---- Training parameters for the rotation matrix ----
+    epochs = 10
+    lr = 0.001
+    batch_size = 100
+    gradient_accumulation_steps = 1
+    # -----------------------------------------------------
+
     target_model.load_state_dict(torch.load(state_dict_path))
     target_model.eval()
     target_model.device = "cpu"
@@ -150,7 +236,7 @@ def DAS_MnistDPL(target_model: MnistDPL, state_dict_path: str, counterfactual_da
         representations=[
             # First interventions: target the first dimensions of the concept layer.
             RepresentationConfig(
-                layer=0,  # layer to target  maybe name of the layer?
+                layer=0,  # layer to target
                 component="block_output",  # intervention type
                 unit="pos",
                 max_number_of_units=1,  # max number of units to align for C1
@@ -181,12 +267,6 @@ def DAS_MnistDPL(target_model: MnistDPL, state_dict_path: str, counterfactual_da
     # Load the dataset to retrieve image tensors
     train_dataset, _, _ = load_2MNIST(args=SimpleNamespace(task="addition"))
 
-    # Training parameters for the rotation matrix
-    epochs = 10
-    lr = 0.001
-    batch_size = 100
-    gradient_accumulation_steps = 1
-
     # Optimizer: we only optimize the rotation parameters from DAS, the rest of the model is frozen.
     optimizer_params = []
     for k, v in intervenable.interventions.items():
@@ -199,7 +279,7 @@ def DAS_MnistDPL(target_model: MnistDPL, state_dict_path: str, counterfactual_da
         preds = torch.argmax(eval_preds, dim=1)
         correct_count = (preds == eval_labels).sum().item()
         accuracy = correct_count / eval_labels.size(0)
-        return {"accuracy": accuracy}
+        return {"accuracy": accuracy, "correct": correct_count, "total": eval_labels.size(0)}
 
     def compute_loss(outputs, labels):
         # If labels are provided as one-hot, you might need to convert them:
@@ -208,17 +288,17 @@ def DAS_MnistDPL(target_model: MnistDPL, state_dict_path: str, counterfactual_da
         return ce_loss(outputs, labels)
 
     def batched_random_sampler(data):
-        batch_indices = [_ for _ in range(int(len(data) / batch_size))]
+        batch_indices = [i for i in range(int(len(data) / batch_size))]
         random.shuffle(batch_indices)
         for b_i in batch_indices:
             for i in range(b_i * batch_size, (b_i + 1) * batch_size):
                 yield i
 
-    # We can train the rotation matrix such that we get perfect interchange intervention accuracy,
-    # meaning the trained network perfectly implements the high-level algorithm on the training data.
-    intervenable.model.train()  # train enables drop-off but no grads
+    best_iia = 0.0  # Will store the best observed IIA (i.e., DII score)
+
+    intervenable.model.train()  # set to train mode for DAS training
     print("Distributed Intervention Training, trainable parameters: ", intervenable.count_parameters())
-    train_iterator = trange(0, int(epochs), desc="Epoch")
+    train_iterator = trange(epochs, desc="Epoch")
 
     total_step = 0
     for epoch in train_iterator:
@@ -242,8 +322,6 @@ def DAS_MnistDPL(target_model: MnistDPL, state_dict_path: str, counterfactual_da
             # Assume that batch["input_ids"] is of shape [batch_size, 1] after unsqueeze.
             base_indices = batch["input_ids"].squeeze(1)  # shape: [batch_size]
             base_images = torch.stack([train_dataset[int(idx.item())][0] for idx in base_indices])
-            # Optionally, add the unsqueeze if the model expects a sequence dimension.
-            base_images = base_images.unsqueeze(1)  # now shape: [batch_size, 1, C, H, W]
 
             # Retrieve source images from indices.
             # Assume that batch["source_input_ids"] is of shape [batch_size, 2, 1] after unsqueeze.
@@ -254,69 +332,12 @@ def DAS_MnistDPL(target_model: MnistDPL, state_dict_path: str, counterfactual_da
                 imgs = torch.stack([train_dataset[int(idx.item())][0] for idx in source_indices[:, pos]])
                 source_images.append(imgs)
 
-            # Call the intervenable model.
-            if batch["intervention_id"][0] == 2:
-                _, counterfactual_outputs = intervenable(
-                    {"input_ids": base_images},
-                    [
-                        {"inputs_embeds": source_images[0]},
-                        {"inputs_embeds": source_images[1]},
-                    ],
-                    {
-                        "sources->base": (
-                            [[[0]] * batch_size, [[0]] * batch_size],  # source position 0 into base position 0
-                            [[[0]] * batch_size, [[0]] * batch_size],
-                        )
-                    },
-                    subspaces=[
-                        [[_ for _ in range(0, 10)]] * batch_size,
-                        [[_ for _ in range(10, 20)]] * batch_size,
-                    ],
-                )
-            elif batch["intervention_id"][0] == 0:
-                _, counterfactual_outputs = intervenable(
-                    {"input_ids": base_images},
-                    [{"inputs_embeds": source_images[0]}, None],
-                    {
-                        "sources->base": (
-                            [[[0]] * batch_size, None],
-                            [[[0]] * batch_size, None],
-                        )
-                    },
-                    subspaces=[
-                        [[_ for _ in range(0, 10)]] * batch_size,
-                        None,
-                    ],
-                )
-            elif batch["intervention_id"][0] == 1:
-                _, counterfactual_outputs = intervenable(
-                    {"input_ids": base_images},
-                    [None, {"inputs_embeds": source_images[0]}],
-                    {
-                        "sources->base": (
-                            [None, [[0]] * batch_size],
-                            [None, [[0]] * batch_size],
-                        )
-                    },
-                    subspaces=[
-                        None,
-                        [[_ for _ in range(10, 20)]] * batch_size,
-                    ],  # Or subspaces=1 to intervene only dimensions from 0 to 4 if defined subspace_partition=[[0, 4], [4, 8]] in config
-                )
-                """
-                intervenable(
-                    base, [None, source],
-                    # 4 means token position 4
-                    {"sources->base": ([None, [[4]]], [None, [[4]]])},
-                    # 1 means the second partition in the config
-                    subspaces=[None, [[1]]],
-                    )
-                """
+            # Call the intervenable model depending on the intervention_id.
+            intervention_id = batch["intervention_id"][0]
+            counterfactual_outputs = apply_intervention(intervenable, base_images, source_images, intervention_id, batch_size)
 
-            # Compute regression metrics.
-            eval_metrics = compute_metrics(
-                counterfactual_outputs[0].detach(), batch["labels"].squeeze()
-            )
+            # Compute loss and metrics.
+            eval_metrics = compute_metrics(counterfactual_outputs[0].detach(), batch["labels"].squeeze())
 
             # loss and backprop
             loss = compute_loss(counterfactual_outputs[0], batch["labels"].squeeze().to(torch.long))
@@ -330,3 +351,50 @@ def DAS_MnistDPL(target_model: MnistDPL, state_dict_path: str, counterfactual_da
                 optimizer.step()
                 intervenable.set_zero_grad()
             total_step += 1
+
+        """Evaluation after each epoch"""
+
+        intervenable.model.eval()  # set model to evaluation mode
+        total_correct = 0
+        total_samples = 0
+
+        eval_dataloader = DataLoader(counterfactual_dataset, batch_size=batch_size, shuffle=False)  # TODO use validation dataset
+        with torch.no_grad():
+            for batch in tqdm(eval_dataloader, desc=f"Evaluating Epoch {epoch}"):
+                # Retrieve base images.
+                base_indices = batch["input_ids"].squeeze(1)
+                base_images = torch.stack([train_dataset[int(idx.item())][0] for idx in base_indices])
+
+                # Retrieve source images.
+                source_indices = batch["source_input_ids"].squeeze(2)
+                source_images = []
+                for pos in range(source_indices.shape[1]):
+                    imgs = torch.stack([train_dataset[int(idx.item())][0] for idx in source_indices[:, pos]])
+                    source_images.append(imgs)
+
+                # Apply the intervention.
+                intervention_id = batch["intervention_id"][0]
+                counterfactual_outputs = apply_intervention(intervenable, base_images, source_images, intervention_id, batch_size)
+
+                # Compute metrics for this batch.
+                metrics = compute_metrics(counterfactual_outputs[0], batch["labels"].squeeze())
+                total_correct += metrics["correct"]
+                total_samples += metrics["total"]
+
+        epoch_accuracy = total_correct / total_samples if total_samples > 0 else 0.0
+        print(f"Epoch {epoch} Evaluation IIA: {epoch_accuracy:.4f}")
+
+        # Update the best IIA (DII score) if current epoch accuracy is higher.
+        if epoch_accuracy > best_iia:
+            best_iia = epoch_accuracy
+
+        # Switch back to training mode.
+        intervenable.model.train()
+
+    print(f"Best DII score (highest IIA observed): {best_iia:.4f}")
+
+
+if __name__ == "__main__":
+    encoder = MNISTSingleEncoder()
+    model = MnistDPL(encoder, args=SimpleNamespace(dataset="addmnist", task="addition"))
+    DAS_MnistDPL(target_model=model)

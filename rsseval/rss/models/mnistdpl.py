@@ -113,6 +113,7 @@ class MnistDPL(DeepProblogModel):
         cs = []
         xs = torch.split(x, x.size(-1) // self.n_images, dim=-1)
         for i in range(self.n_images):
+            # xs[i]=torch.Size([64, 1, 28, 28])
             lc, mu, logvar = self.encoder(xs[i])  # sizes are ok
             # lc: Latent concept representation extracted from the image.
             # mu: Mean of the latent variable distribution.

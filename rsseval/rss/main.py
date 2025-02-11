@@ -215,7 +215,7 @@ def main(args):
         # perform posthoc evaluation/ cl training/ joint training
         print("    Chosen device:", model.device)
 
-        if args.preprocess:  # TODO what does this do?
+        if args.preprocess:  # What does this do?
             preprocess(model, dataset, args)
             print("\n ### Closing ###")
             quit()
