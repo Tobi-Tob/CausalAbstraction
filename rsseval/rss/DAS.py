@@ -214,20 +214,11 @@ def DAS_MnistDPL(target_model: MnistDPL, state_dict_path="test_model_addmnist_mn
     python main.py --DAS --model mnistdpl --dataset addmnist --task addition --backbone conceptizer --checkin test_model_addmnist_mnistdpl.pth --batch_size 100
     """
 
-    # ---- Training parameters for the rotation matrix ----
+    # ============== Training parameters and config ==============
     epochs = 10
     lr = 0.001
     batch_size = 100
     gradient_accumulation_steps = 1
-    # -----------------------------------------------------
-
-    target_model.load_state_dict(torch.load(state_dict_path))
-    target_model.eval()
-    target_model.device = "cpu"
-    target_model.to(target_model.device)
-
-    print("loading counterfactual data")
-    counterfactual_dataset = torch.load(counterfactual_data_path, weights_only=True)
 
     # In our case our target model has “concept layer” (stored in self.h) of size 20.
     # We want to intervene on two subspaces: indices 0-3 (for C1) and indices 4-7 (for C2).
@@ -254,8 +245,19 @@ def DAS_MnistDPL(target_model: MnistDPL, state_dict_path="test_model_addmnist_mn
                 intervention_link_key=0,
             ),
         ],
-        intervention_types=RotatedSpaceIntervention,
-    )
+        intervention_types=RotatedSpaceIntervention)
+    # ==============================================================
+
+    # Load the target model
+    target_model.load_state_dict(torch.load(state_dict_path))
+    target_model.eval()
+    target_model.device = "cpu"
+    target_model.to(target_model.device)
+
+    # Load the counterfactual data
+    print("loading counterfactual data")
+    counterfactual_dataset = torch.load(counterfactual_data_path, weights_only=True)
+
     # Wrap the model to work with pyvene
     wrapped_model = WrappedMnistDPL(target_model)
     intervenable = IntervenableModel(config, wrapped_model, use_fast=True)
@@ -294,12 +296,11 @@ def DAS_MnistDPL(target_model: MnistDPL, state_dict_path="test_model_addmnist_mn
             for i in range(b_i * batch_size, (b_i + 1) * batch_size):
                 yield i
 
-    best_iia = 0.0  # Will store the best observed IIA (i.e., DII score)
-
     intervenable.model.train()  # set to train mode for DAS training
     print("Distributed Intervention Training, trainable parameters: ", intervenable.count_parameters())
     train_iterator = trange(epochs, desc="Epoch")
 
+    best_iia = 0.0  # Will store the best observed IIA (i.e., DII score)
     total_step = 0
     for epoch in train_iterator:
         epoch_iterator = tqdm(
