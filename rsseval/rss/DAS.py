@@ -189,8 +189,7 @@ def apply_intervention(intervenable, base_images, source_images, intervention_id
     return outputs
 
 
-def DAS_MnistDPL(target_model: MnistDPL, state_dict_path="test_model_addmnist_mnistdpl.pth",
-                 counterfactual_data_path="data/mnist_add_counterfactual_train_data_bs100.pt"):
+def DAS_MnistDPL(target_model: MnistDPL, state_dict_path=None, counterfactual_data_path="data/mnist_add_counterfactual_train_data_bs100.pt"):
     """
     This method implements the Distributed Alignment Search (DAS) algorithm for MnistDPL. We want to see if the target DeepProbLog model
     implements a high-level causal abstraction model to solve the MNIST addition task.
@@ -206,7 +205,7 @@ def DAS_MnistDPL(target_model: MnistDPL, state_dict_path="test_model_addmnist_mn
 
     Args:
         target_model (MnistDPL): DeepProbLog model to be aligned
-        state_dict_path (str): path to the state dictionary of the target model
+        state_dict_path: path to the state dictionary of the target model, if None, the target model is randomly initialized
         image_dataset (Dataset): dataset of the MNIST addition task to retrieve image tensors
         counterfactual_data_path (str): path to the counterfactual data (mapping of image indices to counterfactual predictions)
 
@@ -249,7 +248,11 @@ def DAS_MnistDPL(target_model: MnistDPL, state_dict_path="test_model_addmnist_mn
     # ==============================================================
 
     # Load the target model
-    target_model.load_state_dict(torch.load(state_dict_path))
+    if state_dict_path is None:
+        print("Random Initialization of Target Model")
+        state_dict_path = "random baseline"
+    else:
+        target_model.load_state_dict(torch.load(state_dict_path))
     target_model.eval()
     target_model.device = "cpu"
     target_model.to(target_model.device)
@@ -392,10 +395,11 @@ def DAS_MnistDPL(target_model: MnistDPL, state_dict_path="test_model_addmnist_mn
         # Switch back to training mode.
         intervenable.model.train()
 
-    print(f"Best DII score (highest IIA observed): {best_iia:.4f}")
+    print(f"DII score of {state_dict_path} (highest IIA observed): {best_iia:.4f}")
 
 
 if __name__ == "__main__":
     encoder = MNISTSingleEncoder()
     model = MnistDPL(encoder, args=SimpleNamespace(dataset="addmnist", task="addition"))
-    DAS_MnistDPL(target_model=model)
+    DAS_MnistDPL(target_model=model, state_dict_path="trained_models/mnistdpl_singleencoder_csup_1.pth")
+    # DAS_MnistDPL(target_model=model, state_dict_path=None)

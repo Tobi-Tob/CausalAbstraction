@@ -55,21 +55,20 @@ class MnistDPL(DeepProblogModel):
             None: This function does not return a value.
         """
         super(MnistDPL, self).__init__(
-            encoder=encoder,  # joint or disjoint architecture is selected here
+            encoder=encoder,  # joint or disjoint architectures is selected here
             model_dict=model_dict,
             n_facts=n_facts,
             nr_classes=nr_classes,
         )
         """
-        encoder MNISTSingleEncoder(
-            (enc_block_1): Conv2d(1, 32, kernel_size=(4, 4), stride=(2, 2), padding=(1, 1))
-            (enc_block_2): Conv2d(32, 64, kernel_size=(4, 4), stride=(2, 2), padding=(1, 1))
-            (enc_block_3): Conv2d(64, 128, kernel_size=(4, 4), stride=(2, 2), padding=(1, 1))
-            (flatten): Flatten()
-            (dense_logvar): Linear(in_features=1152, out_features=160, bias=True)
-            (dense_mu): Linear(in_features=1152, out_features=160, bias=True)
-            (dense_c): Linear(in_features=1152, out_features=10, bias=True)
-            (dropout): Dropout(p=0.5, inplace=False))
+        Possible encoders:
+        Joint architectures:
+            - MNISTPairsEncoder()
+            - MNISTAdditionCNN()
+            - MNISTRepeatedEncoder()
+        Disjoint architectures:
+            - DisjointMNISTAdditionCNN()
+            - MNISTSingleEncoder()
         """
         # how many images and explicit split of concepts
         self.n_images = n_images

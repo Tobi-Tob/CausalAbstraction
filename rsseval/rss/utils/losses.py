@@ -69,8 +69,7 @@ def ADDMNIST_Concept_Match(out_dict: dict, args):
                 objs[j][mask].squeeze(1), g_objs[j][mask].view(-1)
             )
     losses = {"c-loss": loss.item()}
-
-    print(loss.item() / len(objs))
+    # print(loss.item() / len(objs))
 
     return loss / len(objs), losses
 
