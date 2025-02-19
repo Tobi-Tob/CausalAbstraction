@@ -125,15 +125,17 @@ def visualize_concept_contribution(saved_R_path: str):
     contribution to concept C1 (sum of absolute values in rows 0..half-1) and C2 (rows half..end),
     then produces a stacked bar chart (red=C1, blue=C2).
 
+    Visualization idea:
+    We have a concept vector (representing the neural activations before rotation), and a rotation matrix R that,
+    once applied, yields a new vector whose first half of the entries correspond to concept C1 (red) and
+    last half of the entries correspond to concept C2 (blue).
+    The key idea is to show before the rotation which dimensions of the original concept vector “belong” more to C1 vs. C2.
+    It visually explains which parts (dimensions) of the original concept representation are more responsible for the final
+    “red” concept (C1) vs. the final “blue” concept (C2).
+
     Args:
         saved_R_path (str): Path to the saved rotation matrix '.bin' file (torch saved tensor).
     """
-    # TODO is it possible to transform R into a reduced R (neglecting all permutations inside is concept block C1 and C2)
-    #  Basically just looking at what fraction (90%) of dimension 1 stays in its concept block C1 (first 10 dimension)
-    #  and what fraction (10%) is transformed to the other concept block C1 (last 10 dimensions)
-    #  Is my assumption right that following this idea one can create a reduced R
-    #  that is orthonormal and still behaves identical for applied interventions?
-
     # Load the rotation matrix (ensure CPU, detach, convert to NumPy)
     R = torch.load(saved_R_path, weights_only=True).cpu().detach().numpy()
 
@@ -199,7 +201,7 @@ def build_test_R(safe_location):
 
 if __name__ == "__main__":
     # build_test_R("trained_models/test_R.bin")
-    load_R = "trained_models/mnistdpl_MNISTSingleEncoder_1.0_None_R.bin"
+    load_R = "trained_models/mnistdpl_MNISTSingleEncoder_0.0_None_R.bin"
     visualize_rotation_degrees(load_R)
     visualize_rotation_matrix(load_R)
     visualize_concept_contribution(load_R)

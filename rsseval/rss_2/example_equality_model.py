@@ -304,6 +304,3 @@ if __name__ == "__main__":
 
     distributed_alignment_search(target_model_path='trained_models/mlp_dim2.pt', object_dim=object_dim,
                                  counterfactuals_path="data/equality_task_counterfactual_small_data_dim2.pt")
-
-    # TODO Safe the best alignment (rotation parameters) found during training when evaluation on the total training set
-    # TODO Test the rotated and aligned model on counterfactual test data

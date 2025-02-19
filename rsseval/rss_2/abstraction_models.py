@@ -4,9 +4,7 @@ import torch
 import random
 import numpy as np
 from pyvene import CausalModel
-from task_datasets.utils.mnist_creation import load_2MNIST
-
-# from causal_abstraction import StructuralCausalModel # Also usable?
+from datasets.utils.mnist_creation import load_2MNIST
 
 seed = 42
 np.random.seed(seed)
@@ -307,10 +305,10 @@ class CausalMnistAdditionModel(CausalModel):
 
 if __name__ == "__main__":
     causal_model = CausalMnistAdditionModel(data_split="train")
-    # causal_model.generate_data(n_examples=10000, batch_size=100, include_counterfactuals=True)
+    causal_model.generate_data(n_examples=200000, batch_size=20, include_counterfactuals=True)
 
-    dataset = torch.load("data/mnist_add_counterfactual_train_data_bs100.pt", weights_only=True)
-    causal_model.print_dataset_entry(dataset, 0)
+    # dataset = torch.load("data/mnist_add_counterfactual_train_data_bs100.pt", weights_only=True)
+    # causal_model.print_dataset_entry(dataset, 0)
 
 
 

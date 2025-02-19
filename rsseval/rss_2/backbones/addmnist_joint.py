@@ -3,7 +3,19 @@ from torch import nn
 
 from backbones.base.ops import *
 
+
 class MNISTPairsEncoder(nn.Module):
+    """
+        Processes to images stacked together as pair
+        Input (1, 28, 2*28)--> Conv (32 filters, stride=2) --> ReLU --> (32, 14, 28)
+              (32, 14, 28) --> Conv (64 filters, stride=2) --> ReLU --> (64, 7, 14)
+              (64, 7, 14)  --> Conv (128 filters, stride=2) --> ReLU --> (128, 2 or 3?, 7)
+              (128, 2, 7)  --> Flattened to (1292)
+
+              FC Layer (c): (c_dim)
+              FC Layer (mu): (latent_dim)
+              FC Layer (logvar): (latent_dim)
+        """
     def __init__(self, img_channels=1, hidden_channels=32, c_dim=20, latent_dim=20, dropout=0.5):
         super(MNISTPairsEncoder, self).__init__()
 
@@ -69,18 +81,19 @@ class MNISTPairsEncoder(nn.Module):
         x = self.flatten(x)  # batch_size, dim1, dim2, dim3 -> batch_size, dim1*dim2*dim3
 
         # print(x.size())
-        
+
         c, mu, logvar = self.dense_c(x), self.dense_mu(x), self.dense_logvar(x)
 
         # return encodings for each object involved
-        c      = torch.stack(torch.split(c,      self.c_dim//2,      dim=-1), dim=1)
-        mu     = torch.stack(torch.split(mu,     self.latent_dim//2, dim=-1), dim=1)
-        logvar = torch.stack(torch.split(logvar, self.latent_dim//2, dim=-1), dim=1)
+        c = torch.stack(torch.split(c, self.c_dim // 2, dim=-1), dim=1)
+        mu = torch.stack(torch.split(mu, self.latent_dim // 2, dim=-1), dim=1)
+        logvar = torch.stack(torch.split(logvar, self.latent_dim // 2, dim=-1), dim=1)
 
         return c, mu, logvar
 
+
 class MNISTPairsDecoder(nn.Module):
-    def __init__(self, img_channels=1, hidden_channels=32, c_dim=20, latent_dim=20,  dropout=0.5,
+    def __init__(self, img_channels=1, hidden_channels=32, c_dim=20, latent_dim=20, dropout=0.5,
                  **params):
         super(MNISTPairsDecoder, self).__init__()
 
@@ -121,10 +134,9 @@ class MNISTPairsDecoder(nn.Module):
         self.dropout = nn.Dropout(p=dropout)
 
     def forward(self, x: torch.Tensor):
-
         # Unflatten Input
         x = self.dense(x)
-        x = self.unflatten(x, self.hidden_channels*4, self.unflatten_dim)
+        x = self.unflatten(x, self.hidden_channels * 4, self.unflatten_dim)
 
         # MNISTPairsDecoder block 1
         x = self.dec_block_1(x)

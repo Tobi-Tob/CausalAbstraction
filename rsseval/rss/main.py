@@ -197,6 +197,8 @@ def main(args):
         encoder, decoder = dataset.get_backbone()  # TL: joint or disjoint
         n_images, c_split = dataset.get_split()  # Based on args.joint True or False: n_images= 1 or 2 c_split= (10, 10) or (10,)
         model = get_model(args, encoder, decoder, n_images, c_split)
+        print(model)
+        print(args)
         loss = model.get_loss(args)
         model.start_optim(args)
 
@@ -247,7 +249,12 @@ if __name__ == "__main__":
 
 """
 Example call:
-python main.py --model mnistdpl --dataset addmnist --task addition --backbone conceptizer --n_epochs 2 --validate --wandb tobi-tob-tu-darmstadt
+python main.py --model mnistdpl --dataset addmnist --task addition --backbone conceptizer --n_epochs 20 --c_sup 1 --validate --wandb tobi-tob-tu-darmstadt
+python main.py --model mnistdpl --dataset addmnist --task addition --backbone conceptizer --joint --n_epochs 20 --validate --wandb tobi-tob-tu-darmstadt
+
+python main.py --model mnistdpl --dataset addmnist --task addition --backbone conceptizer --joint --n_epochs 10 --c_sup 1 --checkout --tuning --val_metric f1 --wandb tobi-tob-tu-darmstadt --proj_name joint_test
+
+
 
 General Arguments
 
