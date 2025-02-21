@@ -1,23 +1,20 @@
+# This script is just an example to verify the DAS method works as intended
+
 import random
 from types import SimpleNamespace
 from typing import Optional
-import torch.nn.functional as F
 import numpy as np
 import torch
 from torch import nn
 from tqdm import tqdm, trange
-
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader
 import pyvene
 from pyvene.models.mlp.modelings_mlp import MLPConfig
 from transformers.modeling_outputs import SequenceClassifierOutput
-
-from task_datasets.utils.mnist_creation import load_2MNIST
+from datasets.utils.mnist_creation import load_2MNIST
 from pyvene import (
     IntervenableModel,
-    VanillaIntervention,
     RotatedSpaceIntervention,
-    LowRankRotatedSpaceIntervention,
     RepresentationConfig,
     IntervenableConfig,
 )
@@ -103,13 +100,13 @@ class ExampleMnistAddModel(nn.Module):
             # Build the concept vector by interleaving bits.
             # First two entries: first bit of digit1 and digit2, etc.
             concept = []
-            # for bit1, bit2 in zip(bin1, bin2):
-            #     concept.append(int(bit1))
-            #     concept.append(int(bit2))
-            for bit1 in bin1:
+            for bit1, bit2 in zip(bin1, bin2):
                 concept.append(int(bit1))
-            for bit2 in bin2:
                 concept.append(int(bit2))
+            # for bit1 in bin1:
+            #     concept.append(int(bit1))
+            # for bit2 in bin2:
+            #     concept.append(int(bit2))
             concept_vectors.append(concept)
 
         # Convert to a torch tensor.
@@ -169,7 +166,8 @@ class PyveneWrapped(MLPForClassification):
         self.score = nn.Linear(self.wrapped_config.h_dim, self.wrapped_config.num_classes, bias=self.wrapped_config.include_bias)
 
         # Set the weights of self.score to the handcrafted weight vector.
-        handcrafted_weight = torch.tensor([8, 4, 2, 1, 8, 4, 2, 1], dtype=torch.float32)
+        # handcrafted_weight = torch.tensor([8, 4, 2, 1, 8, 4, 2, 1], dtype=torch.float32)
+        handcrafted_weight = torch.tensor([8, 8, 4, 4, 2, 2, 1, 1], dtype=torch.float32)
         with torch.no_grad():
             self.score.weight.copy_(handcrafted_weight)
             if self.wrapped_config.include_bias:
@@ -224,7 +222,7 @@ class PyveneWrapped(MLPForClassification):
             return (logits,)
 
 
-def distributed_alignment_search(target_model: nn.Module, counterfactual_data_path: str):
+def DAS_ExampleMnist(target_model: ExampleMnistAddModel, counterfactual_data_path: str):
     """
     The two high-level variables C1 and C2 of the causal model (representing the values of a digit in a human reasoning process)
     will be encoded somewhere in a multidimensional linear subspaces of our example target model.
@@ -275,6 +273,7 @@ def distributed_alignment_search(target_model: nn.Module, counterfactual_data_pa
     lr = 0.001
     batch_size = 100
     gradient_accumulation_steps = 1
+    R_save_path = "trained_models/ExampleMnistAddModel_R.bin"
 
     # Optimizer: we only optimize the rotation parameters from DAS.
     optimizer_params = []
@@ -416,10 +415,169 @@ def distributed_alignment_search(target_model: nn.Module, counterfactual_data_pa
                 intervenable.set_zero_grad()
             total_step += 1
 
+    intervenable.model.eval()
+    for key, intervention in intervenable.interventions.items():
+        # intervention[0] contains the rotation module; get its weight parameter.
+        R = intervention[0].rotate_layer.weight.detach().cpu()
+        break  # We only need one rotation matrix
+    torch.save(R, R_save_path)
+    print(f"Last rotation matrix saved to {R_save_path}")
+    return intervenable
+
+
+def eval_DAS_alignment(counterfactual_data_path: str, bs: int, data_split: str, saved_R_path=None):
+    """
+    This method loads the target model with a trained rotation matrix and evaluates its alignment.
+    It checks how well the target_model with the learned rotation matrix can predict counterfactual data
+    produced by the causal abstraction model. Since the output is a continuous sum value (regression task),
+    regression metrics (e.g., Mean Squared Error) are computed instead of classification statistics.
+
+    Args:
+        counterfactual_data_path: Dataset produced by the causal abstraction model.
+        bs: Batch size to use when loading the counterfactual data.
+        data_split: "train", "val", "test" - should match the split used during counterfactual data generation.
+        saved_R_path: Path to the saved rotation matrix '.bin' file (torch saved tensor).
+                      If None, try to find corresponding R given the state_dict_path.
+
+    Returns:
+        None - prints regression evaluation metrics.
+    """
+    target_model = ExampleMnistAddModel(data_split=data_split)
+    config = IntervenableConfig(
+        model_type=type(target_model),
+        representations=[
+            RepresentationConfig(
+                layer=0,
+                component="block_output",
+                unit="pos",
+                max_number_of_units=1,
+                subspace_partition=None,
+                intervention_link_key=0,
+            ),
+            RepresentationConfig(
+                layer=0,
+                component="block_output",
+                unit="pos",
+                max_number_of_units=1,
+                subspace_partition=None,
+                intervention_link_key=0,
+            ),
+        ],
+        intervention_types=RotatedSpaceIntervention,
+    )
+    # Wrap the model
+    wrapped_model = PyveneWrapped(target_model)
+    intervenable = IntervenableModel(config, wrapped_model, use_fast=True)
+    intervenable.set_device("cpu")
+    intervenable.disable_model_gradients()
+
+    # Load the rotation matrix (ensure CPU, detach, convert to NumPy)
+    R = torch.load(saved_R_path, weights_only=True).cpu().detach().numpy()
+    # Copy the rotation matrix into intervention[0].rotate_layer
+    with torch.no_grad():
+        for key, intervention in intervenable.interventions.items():
+            state = intervention[0].rotate_layer.state_dict()
+            R_tensor = torch.tensor(R, dtype=intervention[0].rotate_layer.weight.dtype, device="cpu")
+            state['parametrizations.weight.0.base'] = R_tensor.clone()
+            intervention[0].rotate_layer.load_state_dict(state)
+    # Freeze the entire model so that no parameters are updated during evaluation
+    for param in intervenable.model.parameters():
+        param.requires_grad = False
+
+    # Load the counterfactual evaluation data
+    print("Loading counterfactual evaluation data")
+    counterfactual_dataset = torch.load(counterfactual_data_path, weights_only=True)
+
+    # Load the original dataset to retrieve image tensors based on the split.
+    if data_split == 'train':
+        dataset, _, _ = load_2MNIST(args=SimpleNamespace(task="addition"))
+    elif data_split == 'val':
+        _, dataset, _ = load_2MNIST(args=SimpleNamespace(task="addition"))
+    elif data_split == 'test':
+        _, _, dataset = load_2MNIST(args=SimpleNamespace(task="addition"))
+    else:
+        raise ValueError(f"Invalid split: {data_split}")
+
+    eval_labels = []
+    eval_preds = []
+    eval_dataloader = DataLoader(counterfactual_dataset, batch_size=bs, shuffle=False)
+    with torch.no_grad():
+        for batch in tqdm(eval_dataloader, desc="Evaluating"):
+            batch["input_ids"] = batch["input_ids"].unsqueeze(1)
+            batch["source_input_ids"] = batch["source_input_ids"].unsqueeze(2)
+            batch_size = batch["input_ids"].shape[0]
+            for k, v in batch.items():
+                if v is not None and isinstance(v, torch.Tensor):
+                    batch[k] = v.to("cpu")
+
+            # Call the intervenable model based on the intervention_id
+            if batch["intervention_id"][0] == 2:  # Assuming same intervention_id for the whole batch
+                _, counterfactual_outputs = intervenable(
+                    {"input_ids": batch["input_ids"]},
+                    [
+                        {"inputs_embeds": batch["source_input_ids"][:, 0]},
+                        {"inputs_embeds": batch["source_input_ids"][:, 1]},
+                    ],
+                    {
+                        "sources->base": (
+                            [[[0]] * batch_size, [[0]] * batch_size],
+                            [[[0]] * batch_size, [[0]] * batch_size],
+                        )
+                    },
+                    subspaces=[
+                        [[_ for _ in range(0, 4)]] * batch_size,
+                        [[_ for _ in range(4, 8)]] * batch_size,
+                    ],
+                )
+            elif batch["intervention_id"][0] == 0:
+                _, counterfactual_outputs = intervenable(
+                    {"input_ids": batch["input_ids"]},
+                    [{"inputs_embeds": batch["source_input_ids"][:, 0]}, None],
+                    {
+                        "sources->base": (
+                            [[[0]] * batch_size, None],
+                            [[[0]] * batch_size, None],
+                        )
+                    },
+                    subspaces=[
+                        [[_ for _ in range(0, 4)]] * batch_size,
+                        None,
+                    ],
+                )
+            elif batch["intervention_id"][0] == 1:
+                _, counterfactual_outputs = intervenable(
+                    {"input_ids": batch["input_ids"]},
+                    [None, {"inputs_embeds": batch["source_input_ids"][:, 0]}],
+                    {
+                        "sources->base": (
+                            [None, [[0]] * batch_size],
+                            [None, [[0]] * batch_size],
+                        )
+                    },
+                    subspaces=[
+                        None,
+                        [[_ for _ in range(4, 8)]] * batch_size,
+                    ],
+                )
+
+            # For regression, use the raw continuous output.
+            # Squeeze the singleton dimension if needed.
+            preds = counterfactual_outputs[0].squeeze(1)
+            eval_labels.append(batch["labels"])
+            eval_preds.append(preds)
+
+    # Concatenate all predictions and labels.
+    all_preds = torch.cat(eval_preds).cpu()
+    all_labels = torch.cat(eval_labels).cpu()
+
+    # Compute regression metric (Mean Squared Error)
+    mse = ((all_preds - all_labels) ** 2).mean().item()
+    print(f"Mean Squared Error: {mse:.6f}")
+
 
 # Example usage:
 if __name__ == '__main__':
-    model = ExampleMnistAddModel(data_split="train")
+    # model = ExampleMnistAddModel(data_split="train")
     # pv_model = PyveneWrapped(model)
 
     # Test on a batch of indices.
@@ -428,4 +586,6 @@ if __name__ == '__main__':
     # outputs = pv_model(torch.tensor(batch_indices))
     # print(f"Output: {outputs}")
 
-    distributed_alignment_search(target_model=model, counterfactual_data_path="data/mnist_add_counterfactual_train_data_bs100.pt")
+    # DAS_ExampleMnist(target_model=model, counterfactual_data_path="data/mnist_add_counterfactual_train_data_bs100.pt")
+    eval_DAS_alignment(counterfactual_data_path="data/mnist_add_counterfactual_train_data_bs100.pt", bs=100, data_split="train",
+                       saved_R_path="trained_models/identity_even_odd_R.bin")

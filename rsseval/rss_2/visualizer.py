@@ -189,19 +189,38 @@ def visualize_concept_contribution(saved_R_path: str):
 
 
 def build_test_R(safe_location):
-    R_test = np.array([
+    # --- Custom Matrix ---
+    R_custom = np.array([
         [1.0, 0.0, 0.0, 0.0],
         [0.0, 0.4, 0.1, 0.5],
         [0.0, 0.1, 0.9, 0.0],
         [0.0, 0.5, 0.0, 0.5]
     ])
-    R_test_tensor = torch.tensor(R_test, dtype=torch.float32)
-    torch.save(R_test_tensor, safe_location)
+    # --- Identity ---
+    n = 8
+    R_identity = np.identity(n)
+
+    # --- Anti-Diagonal Identity ---
+    R_anti_identity = np.zeros((n, n), dtype=int)
+    for i in range(n // 2):
+        R_anti_identity[i, n // 2 + i] = 1  # Upper-right quarter
+        R_anti_identity[n // 2 + i, i] = 1  # Lower-left quarter
+
+    # --- Even-Odd Separation Matrix ---
+    R_even_odd = np.zeros((n, n), dtype=int)
+    indices = [2 * i for i in range(n//2)] + [2 * i + 1 for i in range(n//2)]
+
+    # Fill the permutation matrix so that the output position new_idx takes the value from input position old_idx.
+    for new_idx, old_idx in enumerate(indices):
+        R_even_odd[new_idx, old_idx] = 1
+
+    R = torch.tensor(R_even_odd, dtype=torch.float32)
+    torch.save(R, safe_location)
 
 
 if __name__ == "__main__":
-    # build_test_R("trained_models/test_R.bin")
-    load_R = "trained_models/mnistdpl_MNISTSingleEncoder_0.0_None_R.bin"
+    # build_test_R("trained_models/identity_even_odd_R.bin")
+    load_R = "trained_models/ExampleMnistAddModel_R.bin"
     visualize_rotation_degrees(load_R)
     visualize_rotation_matrix(load_R)
     visualize_concept_contribution(load_R)

@@ -3,7 +3,20 @@ from torch import nn
 
 from backbones.base.ops import *
 
+
 class MNISTRepeatedEncoder(nn.Module):
+    """
+    Processes 2 images with 2 different repeated encoder architectures and stacks c, mu and logvar at the end
+    Input (1, 28, 28)--> Conv (32 filters, stride=2) --> ReLU --> (32, 14, 14)
+          (32, 14, 14) --> Conv (64 filters, stride=2) --> ReLU --> (64, 7, 7)
+          (64, 7, 7)  --> Conv (128 filters, stride=2) --> ReLU --> (128, 3, 3)
+          (128, 3, 3)  --> Flattened to (1152)
+
+          FC Layer (c): (2*c_dim)
+          FC Layer (mu): (2*latent_dim)
+          FC Layer (logvar): (2*latent_dim)
+    """
+
     def __init__(self, img_channels=1, hidden_channels=32, c_dim=10, latent_dim=10, dropout=0.5):
         super(MNISTRepeatedEncoder, self).__init__()
 
@@ -13,72 +26,70 @@ class MNISTRepeatedEncoder(nn.Module):
         self.latent_dim = latent_dim
 
         self.unflatten_dim = (3, 7)
-        
+
         self.enc_block_11 = nn.Conv2d(
-                                    in_channels=self.img_channels,
-                                    out_channels=self.hidden_channels,
-                                    kernel_size=4,
-                                    stride=2,
-                                    padding=1)
+            in_channels=self.img_channels,
+            out_channels=self.hidden_channels,
+            kernel_size=4,
+            stride=2,
+            padding=1)
         self.enc_block_12 = nn.Conv2d(
-                                    in_channels=self.img_channels,
-                                    out_channels=self.hidden_channels,
-                                    kernel_size=4,
-                                    stride=2,
-                                    padding=1)
-        
+            in_channels=self.img_channels,
+            out_channels=self.hidden_channels,
+            kernel_size=4,
+            stride=2,
+            padding=1)
+
         self.enc_block_21 = nn.Conv2d(
-                                    in_channels=self.hidden_channels,
-                                    out_channels=self.hidden_channels * 2,
-                                    kernel_size=4,
-                                    stride=2,
-                                    padding=1)
-        
+            in_channels=self.hidden_channels,
+            out_channels=self.hidden_channels * 2,
+            kernel_size=4,
+            stride=2,
+            padding=1)
+
         self.enc_block_22 = nn.Conv2d(
-                                    in_channels=self.hidden_channels,
-                                    out_channels=self.hidden_channels * 2,
-                                    kernel_size=4,
-                                    stride=2,
-                                    padding=1)
-        
+            in_channels=self.hidden_channels,
+            out_channels=self.hidden_channels * 2,
+            kernel_size=4,
+            stride=2,
+            padding=1)
+
         self.enc_block_31 = nn.Conv2d(
-                                    in_channels=self.hidden_channels * 2,
-                                    out_channels=self.hidden_channels * 4,
-                                    kernel_size=4,
-                                    stride=2,
-                                    padding=1)
-        
+            in_channels=self.hidden_channels * 2,
+            out_channels=self.hidden_channels * 4,
+            kernel_size=4,
+            stride=2,
+            padding=1)
+
         self.enc_block_32 = nn.Conv2d(
-                                    in_channels=self.hidden_channels * 2,
-                                    out_channels=self.hidden_channels * 4,
-                                    kernel_size=4,
-                                    stride=2,
-                                    padding=1)
+            in_channels=self.hidden_channels * 2,
+            out_channels=self.hidden_channels * 4,
+            kernel_size=4,
+            stride=2,
+            padding=1)
 
         self.flatten = Flatten()
 
-        self.dense_c1 = nn.Linear(in_features=int(4 * self.hidden_channels * self.unflatten_dim[0] * self.unflatten_dim[1]*(3/7)) ,
-                                 out_features=self.c_dim)
+        self.dense_c1 = nn.Linear(in_features=int(4 * self.hidden_channels * self.unflatten_dim[0] * self.unflatten_dim[1] * (3 / 7)),
+                                  out_features=self.c_dim)
 
-        self.dense_mu1 = nn.Linear(in_features=int(4 * self.hidden_channels * self.unflatten_dim[0] * self.unflatten_dim[1]*(3/7)) ,
-                                 out_features=self.latent_dim)
+        self.dense_mu1 = nn.Linear(in_features=int(4 * self.hidden_channels * self.unflatten_dim[0] * self.unflatten_dim[1] * (3 / 7)),
+                                   out_features=self.latent_dim)
 
-        self.dense_logvar1 = nn.Linear(in_features=int(4 * self.hidden_channels * self.unflatten_dim[0] * self.unflatten_dim[1]*(3/7)) ,
-                                 out_features=self.latent_dim)
+        self.dense_logvar1 = nn.Linear(in_features=int(4 * self.hidden_channels * self.unflatten_dim[0] * self.unflatten_dim[1] * (3 / 7)),
+                                       out_features=self.latent_dim)
 
-        self.dense_c2 = nn.Linear(in_features=int(4 * self.hidden_channels * self.unflatten_dim[0] * self.unflatten_dim[1]*(3/7)) ,
-                                 out_features=self.c_dim)
+        self.dense_c2 = nn.Linear(in_features=int(4 * self.hidden_channels * self.unflatten_dim[0] * self.unflatten_dim[1] * (3 / 7)),
+                                  out_features=self.c_dim)
 
-        self.dense_mu2 = nn.Linear(in_features=int(4 * self.hidden_channels * self.unflatten_dim[0] * self.unflatten_dim[1]*(3/7)) ,
-                                 out_features=self.latent_dim)
+        self.dense_mu2 = nn.Linear(in_features=int(4 * self.hidden_channels * self.unflatten_dim[0] * self.unflatten_dim[1] * (3 / 7)),
+                                   out_features=self.latent_dim)
 
-        self.dense_logvar2 = nn.Linear(in_features=int(4 * self.hidden_channels * self.unflatten_dim[0] * self.unflatten_dim[1]*(3/7)) ,
-                                 out_features=self.latent_dim)
-
+        self.dense_logvar2 = nn.Linear(in_features=int(4 * self.hidden_channels * self.unflatten_dim[0] * self.unflatten_dim[1] * (3 / 7)),
+                                       out_features=self.latent_dim)
 
         self.dropout = nn.Dropout(p=dropout)
-        
-        
+
     def forward1(self, x):
         # MNISTPairsEncoder block 1
         x = self.enc_block_11(x)
@@ -98,11 +109,11 @@ class MNISTRepeatedEncoder(nn.Module):
         x = self.flatten(x)  # batch_size, dim1, dim2, dim3 -> batch_size, dim1*dim2*dim3
 
         # print(x.size())
-        
+
         c, mu, logvar = self.dense_c1(x), self.dense_mu1(x), self.dense_logvar1(x)
-        
+
         return c, mu, logvar
-    
+
     def forward2(self, x):
         # MNISTPairsEncoder block 1
         x = self.enc_block_12(x)
@@ -122,28 +133,27 @@ class MNISTRepeatedEncoder(nn.Module):
         x = self.flatten(x)  # batch_size, dim1, dim2, dim3 -> batch_size, dim1*dim2*dim3
 
         # print(x.size())
-        
+
         c, mu, logvar = self.dense_c2(x), self.dense_mu2(x), self.dense_logvar2(x)
-        
+
         return c, mu, logvar
-        
 
     def forward(self, x):
-        
         xs = torch.split(x, x.size(-1) // self.n_images, dim=-1)
-        
+
         c1, mu1, logvar1 = self.forward1(xs[0])
         c2, mu2, logvar2 = self.forward1(xs[1])
 
         # return encodings for each object involved
-        c      = torch.stack((c1, c2), dim=1)
-        mu     = torch.stack((mu1, mu2), dim=1)
+        c = torch.stack((c1, c2), dim=1)
+        mu = torch.stack((mu1, mu2), dim=1)
         logvar = torch.stack((logvar1, logvar2), dim=1)
 
         return c, mu, logvar
 
+
 class MNISTPairsDecoder(nn.Module):
-    def __init__(self, img_channels=1, hidden_channels=32, c_dim=20, latent_dim=20,  dropout=0.5,
+    def __init__(self, img_channels=1, hidden_channels=32, c_dim=20, latent_dim=20, dropout=0.5,
                  **params):
         super(MNISTPairsDecoder, self).__init__()
 
@@ -184,10 +194,9 @@ class MNISTPairsDecoder(nn.Module):
         self.dropout = nn.Dropout(p=dropout)
 
     def forward(self, x: torch.Tensor):
-
         # Unflatten Input
         x = self.dense(x)
-        x = self.unflatten(x, self.hidden_channels*4, self.unflatten_dim)
+        x = self.unflatten(x, self.hidden_channels * 4, self.unflatten_dim)
 
         # MNISTPairsDecoder block 1
         x = self.dec_block_1(x)
