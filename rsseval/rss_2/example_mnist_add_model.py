@@ -206,15 +206,12 @@ class PyveneWrapped(MLPForClassification):
             # print('source')
         else:
             raise ValueError("No valid input provided (input_ids or inputs_embeds required)")
-        # print('input', x)
         # Update the concept layer in the wrapped model.
         _ = self.wrapped_model(x)
         # Get the hidden state from our fake block.
         h = self.h[0](None)
-        # print('h', h)
         # Apply the handcrafted linear head to compute the regression output.
         logits = self.score(h)
-        # print('logits', logits)
 
         if return_dict:
             return SequenceClassifierOutput(loss=None, logits=logits, hidden_states=h)  # return the concept layer as hidden state
@@ -587,5 +584,5 @@ if __name__ == '__main__':
     # print(f"Output: {outputs}")
 
     # DAS_ExampleMnist(target_model=model, counterfactual_data_path="data/mnist_add_counterfactual_train_data_bs100.pt")
-    eval_DAS_alignment(counterfactual_data_path="data/mnist_add_counterfactual_train_data_bs100.pt", bs=100, data_split="train",
-                       saved_R_path="trained_models/identity_even_odd_R.bin")
+    eval_DAS_alignment(counterfactual_data_path="data/mnist_add_counterfactual_val_data_bs100.pt", bs=100, data_split="val",
+                       saved_R_path="trained_models/ExampleMnistAddModel_R.bin")

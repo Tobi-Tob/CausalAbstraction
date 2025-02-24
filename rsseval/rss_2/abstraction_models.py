@@ -304,8 +304,8 @@ class CausalMnistAdditionModel(CausalModel):
 
 
 if __name__ == "__main__":
-    causal_model = CausalMnistAdditionModel(data_split="train")
-    causal_model.generate_data(n_examples=200000, batch_size=20, include_counterfactuals=True)
+    causal_model = CausalMnistAdditionModel(data_split="test")
+    causal_model.generate_data(n_examples=100000, batch_size=100, include_counterfactuals=True)
 
     # dataset = torch.load("data/mnist_add_counterfactual_train_data_bs100.pt", weights_only=True)
     # causal_model.print_dataset_entry(dataset, 0)

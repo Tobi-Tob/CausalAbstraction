@@ -2,13 +2,10 @@ import argparse
 import os
 import random
 from types import SimpleNamespace
-from typing import Optional
 import torch
-from torch import nn
 from tqdm import tqdm, trange
 from torch.utils.data import Dataset, DataLoader
 from sklearn.metrics import classification_report
-import pyvene
 
 from datasets.utils.mnist_creation import load_2MNIST
 from pyvene import (
@@ -182,10 +179,11 @@ def DAS_MnistDPL(target_model: MnistDPL, state_dict_path, counterfactual_data_pa
 
     # Load the counterfactual data
     print("loading counterfactual data")
-    counterfactual_dataset = torch.load(counterfactual_data_path, weights_only=True)
+    counterfactual_train_dataset = torch.load(counterfactual_data_path, weights_only=True)
+    counterfactual_val_dataset = torch.load(counterfactual_val, weights_only=True)
 
     # Load the dataset to retrieve image tensors
-    train_dataset, _, _ = load_2MNIST(args=SimpleNamespace(task="addition"))
+    train_mnist, val_mnist, _ = load_2MNIST(args=SimpleNamespace(task="addition"))
 
     # Optimizer: we only optimize the rotation parameters from DAS, the rest of the model is frozen.
     optimizer_params = []
@@ -223,9 +221,9 @@ def DAS_MnistDPL(target_model: MnistDPL, state_dict_path, counterfactual_data_pa
     for epoch in train_iterator:
         epoch_iterator = tqdm(
             DataLoader(
-                counterfactual_dataset,
+                counterfactual_train_dataset,
                 batch_size=batch_size,
-                sampler=batched_random_sampler(counterfactual_dataset),
+                sampler=batched_random_sampler(counterfactual_train_dataset),
             ),
             desc=f"Epoch: {epoch}", position=0, leave=True
         )
@@ -240,7 +238,7 @@ def DAS_MnistDPL(target_model: MnistDPL, state_dict_path, counterfactual_data_pa
             # Retrieve base images from indices.
             # Assume that batch["input_ids"] is of shape [batch_size, 1] after unsqueeze.
             base_indices = batch["input_ids"].squeeze(1)  # shape: [batch_size]
-            base_images = torch.stack([train_dataset[int(idx.item())][0] for idx in base_indices])
+            base_images = torch.stack([train_mnist[int(idx.item())][0] for idx in base_indices])
 
             # Retrieve source images from indices.
             # Assume that batch["source_input_ids"] is of shape [batch_size, 2, 1] after unsqueeze.
@@ -248,7 +246,7 @@ def DAS_MnistDPL(target_model: MnistDPL, state_dict_path, counterfactual_data_pa
             source_images = []
             # Loop over the two source positions (e.g., one for C1 and one for C2).
             for pos in range(source_indices.shape[1]):
-                imgs = torch.stack([train_dataset[int(idx.item())][0] for idx in source_indices[:, pos]])
+                imgs = torch.stack([train_mnist[int(idx.item())][0] for idx in source_indices[:, pos]])
                 source_images.append(imgs)
 
             # Call the intervenable model depending on the intervention_id.
@@ -277,18 +275,18 @@ def DAS_MnistDPL(target_model: MnistDPL, state_dict_path, counterfactual_data_pa
         total_correct = 0
         total_samples = 0
 
-        eval_dataloader = DataLoader(counterfactual_dataset, batch_size=batch_size, shuffle=False)  # TODO use validation dataset
+        eval_dataloader = DataLoader(counterfactual_val_dataset, batch_size=batch_size, shuffle=False)
         with torch.no_grad():
-            for batch in tqdm(eval_dataloader, desc=f"Evaluating Epoch {epoch}"):
+            for batch in tqdm(eval_dataloader, desc=f"Validating Epoch {epoch}"):
                 # Retrieve base images.
                 base_indices = batch["input_ids"].squeeze(1)
-                base_images = torch.stack([train_dataset[int(idx.item())][0] for idx in base_indices])
+                base_images = torch.stack([val_mnist[int(idx.item())][0] for idx in base_indices])
 
                 # Retrieve source images.
                 source_indices = batch["source_input_ids"].squeeze(2)
                 source_images = []
                 for pos in range(source_indices.shape[1]):
-                    imgs = torch.stack([train_dataset[int(idx.item())][0] for idx in source_indices[:, pos]])
+                    imgs = torch.stack([val_mnist[int(idx.item())][0] for idx in source_indices[:, pos]])
                     source_images.append(imgs)
 
                 # Apply the intervention.
@@ -323,14 +321,13 @@ def DAS_MnistDPL(target_model: MnistDPL, state_dict_path, counterfactual_data_pa
     # TODO ensure that only the rotation matrix R is optimized
 
 
-def eval_DAS_alignment(target_model: MnistDPL, state_dict_path, counterfactual_data_path: str, bs: int, data_split: str, saved_R_path=None):
+def eval_DAS_alignment(target_model: MnistDPL, state_dict_path, bs: int, data_split: str, saved_R_path=None):
     """
     This method loads a target model with a trained rotation matrix and evaluates its alignment. How good is the target_model
     with the learned rotation matrix to predict counterfactual data (of different splits) produced by the causal abstraction model.
     Args:
         target_model: Model architecture to use
         state_dict_path: Trained target_model parameters
-        counterfactual_data_path: Dataset produced by the causal abstraction model
         bs: Batch size to use when loading the counterfactual data. Important to have the same bs used for counterfactual data generation!
         data_split: "train", "val", "test" - Call with the same split used for counterfactual data generation to retrieve the correct images!
         saved_R_path: Path to the saved rotation matrix '.bin' file (torch saved tensor).
@@ -367,19 +364,22 @@ def eval_DAS_alignment(target_model: MnistDPL, state_dict_path, counterfactual_d
     for param in intervenable.model.parameters():
         param.requires_grad = False
 
-    # Load the counterfactual test data
-    print("loading counterfactual test data")
-    counterfactual_dataset = torch.load(counterfactual_data_path, weights_only=True)
-
     # Load the dataset to retrieve image tensors based on the split.
     if data_split == 'train':
         dataset, _, _ = load_2MNIST(args=SimpleNamespace(task="addition"))
+        counterfactual = counterfactual_train
     elif data_split == 'val':
         _, dataset, _ = load_2MNIST(args=SimpleNamespace(task="addition"))
+        counterfactual = counterfactual_val
     elif data_split == 'test':
         _, _, dataset = load_2MNIST(args=SimpleNamespace(task="addition"))
+        counterfactual = counterfactual_test
     else:
         raise ValueError(f"Invalid split: {data_split}")
+
+    # Load the counterfactual data
+    print(f"loading counterfactual {data_split} data")
+    counterfactual_dataset = torch.load(counterfactual, weights_only=True)
 
     eval_labels = []
     eval_preds = []
@@ -405,7 +405,7 @@ def eval_DAS_alignment(target_model: MnistDPL, state_dict_path, counterfactual_d
             # Compute metrics for this batch.
             eval_labels += [batch["labels"]]
             eval_preds += [torch.argmax(counterfactual_outputs[0], dim=1)]
-    print(classification_report(torch.cat(eval_labels).cpu(), torch.cat(eval_preds).cpu()))
+    print(classification_report(torch.cat(eval_labels).cpu(), torch.cat(eval_preds).cpu(), digits=4))
 
 
 if __name__ == "__main__":
@@ -449,12 +449,6 @@ if __name__ == "__main__":
              "If not set, SingleEncoder of digit images is used.",
     )
     parser.add_argument(
-        "--counterfactual",
-        type=str,
-        default="data/mnist_add_counterfactual_train_data_bs100.pt",
-        help="Path to the counterfactual data (mapping of image indices to counterfactual predictions) to evaluate DAS on",
-    )
-    parser.add_argument(
         "--bs",
         type=int,
         default=100,
@@ -491,18 +485,21 @@ if __name__ == "__main__":
     encoder, decoder = dataset.get_backbone()  # get joint or disjoint architecture
     n_images, c_split = dataset.get_split()  # Based on args.joint True or False: n_images= 1 or 2 c_split= (10, 10) or (10,)
     model = get_model(args, encoder, decoder, n_images, c_split)
-    print(model)
+
+    # Your path to the counterfactual data (mapping of image indices to counterfactual predictions) to evaluate DAS on
+    counterfactual_train = "data/mnist_add_counterfactual_train_data_bs100.pt"
+    counterfactual_val = "data/mnist_add_counterfactual_val_data_bs100.pt"
+    counterfactual_test = "data/mnist_add_counterfactual_test_data_bs100.pt"
 
     if args.only_eval:
         """
         Evaluate the alignment using the learned rotation matrix.
         Example call:
-        python DAS.py --only_eval --pretrained trained_models/mnistdpl_MNISTPairsEncoder_0.0_None.pth --joint --data_split train
+        python DAS.py --only_eval --pretrained trained_models/mnistdpl_MNISTPairsEncoder_0.0_None.pth --joint --data_split val
         """
         eval_DAS_alignment(
             target_model=model,
             state_dict_path=args.pretrained,
-            counterfactual_data_path=args.counterfactual,
             bs=args.bs,
             data_split=args.data_split,
             saved_R_path=args.saved_R,
@@ -516,6 +513,6 @@ if __name__ == "__main__":
         DAS_MnistDPL(
             target_model=model,
             state_dict_path=args.pretrained,
-            counterfactual_data_path=args.counterfactual,
+            counterfactual_data_path=counterfactual_train,
             args=args,
         )

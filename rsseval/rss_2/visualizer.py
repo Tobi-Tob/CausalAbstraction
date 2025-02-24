@@ -49,20 +49,58 @@ def check_orthogonality(R, tol=1e-6):
 
 
 def visualize_rotation_degrees(saved_R_path: str):
-    # Load the rotation matrix (ensure it's on CPU and detached)
+    """
+    Visualizes the rotation degrees derived from the eigenvalues of a learned rotation matrix R.
+
+    This function loads a saved rotation matrix from disk, computes its eigenvalues,
+    and then converts these eigenvalues into rotation angles. A histogram is then generated
+    to display the distribution of these rotation angles in degrees.
+
+    Why is this visualization meaningful?
+    -----------------------------------------
+    1. **Interpreting Rotation Angles:**
+       The angles derived from the eigenvalues correspond to the rotation applied in each
+       invariant subspace. By visualizing the distribution, one can check whether most rotations
+       are centered around specific angles, potentially reflecting the separation into high-level
+       concept subspaces.
+
+    2. **Diagnosing Alignment Quality:**
+       A concentrated histogram (most angles within a narrow range) suggests a coherent alignment,
+       whereas a wide spread could indicate that different basis vectors are rotated by varying degrees,
+       which might be a sign of either complex behavior or imperfect alignment.
+
+    3. **Insight into Model Behavior:**
+       If certain clusters or outliers are visible, it might hint at invariant directions (e.g., angles
+       near 0 or 180 degrees) where the transformation is minimal or simply flipping the sign. Such insights
+       can be linked back to whether the model has learned the intended causal abstractions.
+
+    Parameters:
+    -----------
+    saved_R_path : str
+        Path to the saved rotation matrix. The matrix should be stored as a PyTorch tensor.
+
+    Output:
+    --------
+    - Saves a histogram image of the rotation angles (in degrees) to disk.
+    - Prints the eigenvalue magnitudes for a quick numerical check.
+    """
+
+    # Load the rotation matrix R, ensuring it is on CPU and detached from any computation graph.
     R = torch.load(saved_R_path, weights_only=True).cpu().detach().numpy()
 
-    # Compute eigenvalues of the rotation matrix
+    # Compute eigenvalues of the rotation matrix.
     eigenvalues, _ = LA.eig(R)
+    print("Eigenvalue Magnitudes:", np.abs(eigenvalues))
 
-    # Convert eigenvalues to rotation angles (in degrees)
+    # Convert eigenvalues to rotation angles (in radians) and then to degrees.
     angles = eigenvalues_to_angles(eigenvalues)
     degree_angles = to_degree_angles(angles)
 
-    # Set up matplotlib style
+    # Set up matplotlib style for a clear, publication-ready plot.
     plt.rcParams["font.family"] = "DejaVu Serif"
     plt.rcParams.update({'mathtext.default': 'regular'})
 
+    # Use a custom rc_context for styling specific elements of the plot.
     with plt.rc_context({
         'axes.edgecolor': 'black',
         'xtick.color': 'black',
@@ -71,38 +109,55 @@ def visualize_rotation_degrees(saved_R_path: str):
     }):
         fig, ax = plt.subplots(figsize=(5, 3.8))
 
-        # Create the histogram plot for the rotation degrees
+        # Create the histogram plot for the rotation degrees.
+        # This shows the frequency distribution of the rotation angles corresponding to the eigen-directions.
         sns.histplot(degree_angles, bins=30, ax=ax, color="skyblue")
 
+        # Label axes to convey the meaning of the plotted data.
         ax.set_xlabel("Basis Vector Rotation Degree(s)", fontsize=14)
         ax.set_ylabel("Frequency", fontsize=14)
-        ax.legend(labels=["Rotation Matrix"], loc="upper right")
+        # ax.legend(labels=["Rotation Matrix"], loc="upper right")
         ax.grid(color='grey', linestyle='-.', linewidth=1, alpha=0.5)
 
         plt.tight_layout()
+        # Save the figure with a descriptive name.
         img_path = os.path.splitext(saved_R_path)[0] + "_degrees.png"
         plt.savefig(img_path, dpi=200, bbox_inches='tight')
         plt.close()
         print(f"Saved rotation degrees histogram to: {img_path}")
 
 
-def visualize_rotation_matrix(saved_R_path: str):
+def visualize_rotation_matrix(saved_R_path: str, grid_width=0.0):
     """
     Loads a rotation matrix from a file, produces a heatmap of it,
-    and saves the heatmap image.
+    and saves the heatmap image. The color scale is fixed to [-1, 1]
+    so that 0 appears near white and large negative/positive values
+    show strong colors.
 
     Args:
         saved_R_path (str): Path to the saved rotation matrix '.bin' file (torch saved tensor).
     """
     # Load the rotation matrix (ensure it's on CPU and detached)
+    # If your torch.save call didn't use `weights_only=True`, remove that argument below
     R = torch.load(saved_R_path, weights_only=True).cpu().detach().numpy()
 
     # Check matrix properties
     is_orthogonal, is_orthonormal = check_orthogonality(R)
 
-    # Create a heatmap of the rotation matrix using seaborn
+    # Create a heatmap of the rotation matrix using a diverging colormap
+    # 'seismic' has white around zero, red for negative, blue for positive
     plt.figure(figsize=(8, 6))
-    sns.heatmap(R, cmap="viridis", cbar=True)
+    sns.heatmap(
+        R,
+        cmap="seismic",
+        cbar=True,
+        vmin=-1.0,
+        vmax=1.0,
+        center=0.0,
+        linewidths=grid_width,
+        linecolor="gray"
+    )
+
     plt.title("Heatmap of the Rotation Matrix")
     plt.xlabel("Columns")
     plt.ylabel("Rows")
@@ -122,7 +177,7 @@ def visualize_rotation_matrix(saved_R_path: str):
 def visualize_concept_contribution(saved_R_path: str):
     """
     Loads a square rotation matrix R, computes each original dimension's
-    contribution to concept C1 (sum of absolute values in rows 0..half-1) and C2 (rows half..end),
+    contribution to concept C1 (sum of absolute values in columns 0..half-1) and C2 (columns half..end),
     then produces a stacked bar chart (red=C1, blue=C2).
 
     Visualization idea:
@@ -132,6 +187,8 @@ def visualize_concept_contribution(saved_R_path: str):
     The key idea is to show before the rotation which dimensions of the original concept vector “belong” more to C1 vs. C2.
     It visually explains which parts (dimensions) of the original concept representation are more responsible for the final
     “red” concept (C1) vs. the final “blue” concept (C2).
+
+    It matches the mental model that R is simply a linear transformation redistributing the old dimensions into new, concept-aligned ones
 
     Args:
         saved_R_path (str): Path to the saved rotation matrix '.bin' file (torch saved tensor).
@@ -148,14 +205,15 @@ def visualize_concept_contribution(saved_R_path: str):
     c1_contribution = np.zeros(num_dims)
     c2_contribution = np.zeros(num_dims)
 
-    # Compute the contribution for each column (dimension)
+    # For each original dimension i, look at row i of R (in the equation xR=y)
+    # Row i of R indicates how x[i] influences each output dimension y[j].
+    # The first half of columns (0..half-1) correspond to C1, last half to C2.
     for i in range(num_dims):
-        # Column i of R
-        col = R[:, i]
+        row_i = R[i, :]
 
-        # Sum absolute values for top/bottom halves
-        c1_contribution_of_dim_i = np.sum(np.abs(col[:half]))  # C1 (first half rows)
-        c2_contribution_of_dim_i = np.sum(np.abs(col[half:]))  # C2 (last half rows)
+        # Sum absolute values for the columns in the C1 subspace vs. C2 subspace
+        c1_contribution_of_dim_i = np.sum(np.abs(row_i[:half]))  # C1
+        c2_contribution_of_dim_i = np.sum(np.abs(row_i[half:]))  # C2
 
         # Normalize
         denom = c1_contribution_of_dim_i + c2_contribution_of_dim_i + 1e-12
@@ -208,11 +266,11 @@ def build_test_R(safe_location):
 
     # --- Even-Odd Separation Matrix ---
     R_even_odd = np.zeros((n, n), dtype=int)
-    indices = [2 * i for i in range(n//2)] + [2 * i + 1 for i in range(n//2)]
+    indices = [2 * i for i in range(n // 2)] + [2 * i + 1 for i in range(n // 2)]
 
     # Fill the permutation matrix so that the output position new_idx takes the value from input position old_idx.
     for new_idx, old_idx in enumerate(indices):
-        R_even_odd[new_idx, old_idx] = 1
+        R_even_odd[old_idx, new_idx] = 1
 
     R = torch.tensor(R_even_odd, dtype=torch.float32)
     torch.save(R, safe_location)
@@ -220,7 +278,7 @@ def build_test_R(safe_location):
 
 if __name__ == "__main__":
     # build_test_R("trained_models/identity_even_odd_R.bin")
-    load_R = "trained_models/ExampleMnistAddModel_R.bin"
-    visualize_rotation_degrees(load_R)
-    visualize_rotation_matrix(load_R)
-    visualize_concept_contribution(load_R)
+    load_R = "trained_models/mnistdpl_MNISTPairsEncoder_0.0_None_R.bin"
+    visualize_rotation_degrees(saved_R_path=load_R)
+    visualize_rotation_matrix(saved_R_path=load_R, grid_width=0.3)
+    visualize_concept_contribution(saved_R_path=load_R)
