@@ -6,7 +6,7 @@ def ADDMNIST_Classification(out_dict: dict, args):
     out = out_dict['YS']
     labels = out_dict['LABELS'].to(torch.long)
 
-    if args.model in ['mnistdpl', 'mnistdplrec']:
+    if args.model in ['mnistdpl', 'mnistnn', 'mnistdplrec']:
         loss = F.nll_loss(out.log(), labels, reduction='mean')
     elif args.model in ['mnistsl', 'mnistslrec']:
         loss = F.cross_entropy(out, labels, reduction='mean')

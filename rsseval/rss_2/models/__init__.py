@@ -12,7 +12,7 @@ for model in get_all_models():
     names[model] = getattr(mod, class_name)
 
 def get_model(args, encoder, decoder, n_images, c_split):
-    if args.model in ['cext', 'mnistdpl', 'mnistsl', 'mnistltn']:
+    if args.model in ['cext', 'mnistdpl', 'mnistnn', 'mnistsl', 'mnistltn']:
         return names[args.model](encoder, n_images=n_images, c_split=c_split, args=args) # only discriminative
     else:
         return names[args.model](encoder, decoder, n_images=n_images, c_split=c_split, args=args)
