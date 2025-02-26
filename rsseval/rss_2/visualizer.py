@@ -278,7 +278,7 @@ def build_test_R(safe_location):
 
 if __name__ == "__main__":
     # build_test_R("trained_models/identity_even_odd_R.bin")
-    load_R = "trained_models/mnistdpl_MNISTPairsEncoder_0.0_None_R.bin"
+    load_R = "trained_models/mnistnn_MNISTPairsEncoder_0.0_None_R.bin"
     visualize_rotation_degrees(saved_R_path=load_R)
-    visualize_rotation_matrix(saved_R_path=load_R, grid_width=0.3)
+    visualize_rotation_matrix(saved_R_path=load_R, grid_width=0.0)
     visualize_concept_contribution(saved_R_path=load_R)

@@ -43,8 +43,8 @@ class MnistNN(nn.Module):
         self.n_images = n_images
         self.c_split = c_split
         self.encoder = encoder
-        self.n_facts = n_facts
         self.joint = args.joint
+        self.h_dim = 20  # Concept layer
 
         if args.task == "addition":
             self.n_facts = (
@@ -62,9 +62,9 @@ class MnistNN(nn.Module):
 
         self.classifier = nn.Sequential(
             nn.Flatten(),  # This will convert [bs, 1, 20] to [bs, 20]
-            nn.Linear(
-                self.n_facts * self.n_images, self.nr_classes
-            ),
+            nn.Linear(self.h_dim, 64),
+            nn.ReLU(),
+            nn.Linear(64, self.nr_classes),
             nn.Softmax(dim=1),
         )
 
@@ -82,7 +82,7 @@ class MnistNN(nn.Module):
         Returns:
             out_dict: output dict
         """
-        # Image encoding
+        # Image encoding for combined (PairsEncoder) or separate (SingleEncoder) images
         cs = []
         xs = torch.split(x, x.size(-1) // self.n_images, dim=-1)
         for i in range(self.n_images):
@@ -112,4 +112,4 @@ class MnistNN(nn.Module):
             return NotImplementedError('Wrong dataset choice')
 
     def start_optim(self, args):
-        self.opt = torch.optim.Adam(self.parameters(), args.lr)
+        self.opt = torch.optim.Adam(self.parameters(), args.lr, weight_decay=args.weight_decay)

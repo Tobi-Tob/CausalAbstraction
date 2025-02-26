@@ -8,7 +8,6 @@ from torchvision.utils import make_grid
 from utils.wandb_logger import *
 from utils.status import progress_bar
 from datasets.utils.base_dataset import BaseDataset
-from models.mnistdpl import MnistDPL
 from utils.dpl_loss import ADDMNIST_DPL
 from utils.metrics import evaluate_metrics, evaluate_mix
 from utils.generative import conditional_gen, recon_visaulization
@@ -16,12 +15,12 @@ from utils.generative import conditional_gen, recon_visaulization
 from warmup_scheduler import GradualWarmupScheduler
 
 
-def train(model: MnistDPL, dataset: BaseDataset, _loss: ADDMNIST_DPL, args):
+def train(model, dataset: BaseDataset, _loss: ADDMNIST_DPL, args):
     """TRAINING:
         Main training loop for the MnistDPL model with dataset and loss function
 
         Args:
-            model (MnistDPL): network
+            model: network to train
             dataset (BaseDataset): dataset MNIST Addition
             _loss (ADDMNIST_DPL): loss function
             args: parsed args

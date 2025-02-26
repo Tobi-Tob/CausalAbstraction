@@ -35,6 +35,7 @@ def add_experiment_args(parser: ArgumentParser) -> None:
     parser.add_argument('--lr', type=float, default=0.001, help='Learning rate.')
     parser.add_argument('--warmup_steps', type=int, default=2, help='Warmup epochs.')
     parser.add_argument('--exp_decay', type=float, default=0.99, help='Exp decay of learning rate.')
+    parser.add_argument("--weight_decay", type=float, default=0.0001, help="Weight decay (L2 penalty).")
     
     # learning hyperams
     parser.add_argument('--n_epochs',   type=int, default=50, help='Number of epochs per task.')
