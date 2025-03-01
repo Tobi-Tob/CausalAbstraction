@@ -1,10 +1,11 @@
+### Example script to solve a toy task, imports Dataset from huggingface package called datasets
+
 import os
 import torch
 from torch.utils.data import Dataset, DataLoader
 import random
 from tqdm import tqdm, trange
 from sklearn.metrics import classification_report
-from transformers import get_linear_schedule_with_warmup
 from pyvene.models.mlp.modelings_mlp import MLPConfig
 from pyvene import create_mlp_classifier
 from pyvene import (
@@ -16,7 +17,7 @@ from pyvene import (
     IntervenableConfig,
 )
 from transformers import TrainingArguments, Trainer
-from datasets import Dataset
+from datasets import Dataset  # Python looks for the wrong reference if we have a dir called datasets
 
 
 def train_mlp(config, dataset_path: str, save_model_dir: str):

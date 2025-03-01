@@ -127,7 +127,7 @@ def visualize_rotation_degrees(saved_R_path: str):
         print(f"Saved rotation degrees histogram to: {img_path}")
 
 
-def visualize_rotation_matrix(saved_R_path: str, grid_width=0.0):
+def visualize_rotation_matrix(saved_R_path: str):
     """
     Loads a rotation matrix from a file, produces a heatmap of it,
     and saves the heatmap image. The color scale is fixed to [-1, 1]
@@ -149,13 +149,13 @@ def visualize_rotation_matrix(saved_R_path: str, grid_width=0.0):
     plt.figure(figsize=(8, 6))
     sns.heatmap(
         R,
-        cmap="seismic",
+        cmap="coolwarm",
         cbar=True,
         vmin=-1.0,
         vmax=1.0,
         center=0.0,
-        linewidths=grid_width,
-        linecolor="gray"
+        linewidths=1.0,
+        linecolor="black"
     )
 
     plt.title("Heatmap of the Rotation Matrix")
@@ -278,7 +278,7 @@ def build_test_R(safe_location):
 
 if __name__ == "__main__":
     # build_test_R("trained_models/identity_even_odd_R.bin")
-    load_R = "trained_models/mnistnn_MNISTPairsEncoder_0.0_None_R.bin"
-    visualize_rotation_degrees(saved_R_path=load_R)
-    visualize_rotation_matrix(saved_R_path=load_R, grid_width=0.0)
+    load_R = "trained_models/ExampleMnistAddModel_R.bin"
+    visualize_rotation_matrix(saved_R_path=load_R)
     visualize_concept_contribution(saved_R_path=load_R)
+    visualize_rotation_degrees(saved_R_path=load_R)

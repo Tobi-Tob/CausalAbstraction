@@ -1,4 +1,4 @@
-# This script is just an example to verify the DAS method works as intended
+### This script is just an example to verify the DAS method works as intended for MNIST
 
 import random
 from types import SimpleNamespace
@@ -267,8 +267,11 @@ def DAS_ExampleMnist(target_model: ExampleMnistAddModel, counterfactual_data_pat
 
     # Training parameters for the rotation matrix
     epochs = 10
-    lr = 0.001
-    batch_size = 100
+    batch_size = 100  # Set this according to the bs in the counterfactual data!
+    lr = 0.02
+    lr_decay = 0.90
+    binary_reg_weight = 0.2
+    permutation_reg_weight = 1
     gradient_accumulation_steps = 1
     R_save_path = "trained_models/ExampleMnistAddModel_R.bin"
 
@@ -278,6 +281,7 @@ def DAS_ExampleMnist(target_model: ExampleMnistAddModel, counterfactual_data_pat
         optimizer_params += [{"params": v[0].rotate_layer.parameters()}]
         break
     optimizer = torch.optim.Adam(optimizer_params, lr=lr)
+    scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=lr_decay)
 
     def compute_metrics(eval_preds, eval_labels):
         # For regression, we check if the rounded prediction equals the target.
@@ -291,10 +295,71 @@ def DAS_ExampleMnist(target_model: ExampleMnistAddModel, counterfactual_data_pat
         accuracy = float(correct_count) / float(total_count)
         return {"accuracy": accuracy}
 
-    def compute_loss(outputs, labels):
-        # Use Mean Squared Error loss for regression.
-        mse_loss = torch.nn.MSELoss()
-        return mse_loss(outputs.squeeze(), labels.float())
+    def compute_loss(outputs, labels, rotation, binary_reg_weight, permutation_reg_weight):
+        """
+        Computes the total loss as a combination of a data-dependent loss (MSE in this case) and two regularization terms:
+
+        1. Data Loss (MSE):
+            Measures the discrepancy between the counterfactual predictions and the ground truth labels.
+
+        2. Binary Regularization:
+            Encourages every element of the rotation matrix `R` to be near binary values (0 or 1).
+            The regularization term is defined as:
+            L_binary = sum((R_ij * (1 - R_ij))^2)
+            This term is zero when all R_ij are exactly 0 or 1 and positive otherwise.
+
+        3. Permutation Regularization:
+            Enforces an identity-like (or block-diagonal) structure on the rotation matrix by penalizing off-diagonal values
+            in each of its sub-blocks. The matrix R is partitioned into blocks: R11, R12, R21, and R22.
+            For each block, the penalty is:
+            L_perm_block = || block - diag(block) ||_F
+
+        The overall loss is then:
+            L_total = L_mse + binary_reg_weight * L_binary + permutation_reg_weight * L_perm
+
+        Args:
+            outputs (Tensor): Counterfactual predictions.
+            labels (Tensor): Ground truth labels.
+            rotation (Tensor): Rotation matrix R of shape (D, D).
+            binary_reg_weight (float): Weight for the binary regularization term.
+            permutation_reg_weight (float): Weight for the permutation regularization term.
+
+        Returns:
+            Tensor: The computed total loss.
+        """
+        # --- Main counterfactual loss (cross entropy / mean square error) ---
+        mse = torch.nn.MSELoss()
+        mse_loss = mse(outputs.squeeze(), labels.float())
+
+        # --- Binary regularization for all elements in R ---
+        # This term is 0 when an element is exactly 0 or 1, and positive otherwise.
+        binary_loss = torch.sum((rotation * (1 - rotation)) ** 2)
+
+        # --- Permutation regularization loss on all sub blocks in R ---
+        # Partition R into four blocks (R11, R12, R21, R22).
+        num_dims = rotation.shape[0]
+        half_dim = num_dims // 2  # here, half_dim should be 10.
+        R11 = rotation[:half_dim, :half_dim]
+        R12 = rotation[:half_dim, half_dim:]
+        R21 = rotation[half_dim:, :half_dim]
+        R22 = rotation[half_dim:, half_dim:]
+
+        # For each block, construct its diagonal matrix.
+        diag_R11 = torch.diag(torch.diag(R11))
+        diag_R12 = torch.diag(torch.diag(R12))
+        diag_R21 = torch.diag(torch.diag(R21))
+        diag_R22 = torch.diag(torch.diag(R22))
+
+        # Compute the regularization loss for each block.
+        permutation_loss = (
+                torch.norm(R11 - diag_R11, p="fro") +
+                torch.norm(R12 - diag_R12, p="fro") +
+                torch.norm(R21 - diag_R21, p="fro") +
+                torch.norm(R22 - diag_R22, p="fro"))
+
+        # --- Total Loss ---
+        total_loss = mse_loss + binary_reg_weight * binary_loss + permutation_reg_weight * permutation_loss
+        return total_loss
 
     def batched_random_sampler(data):
         batch_indices = [_ for _ in range(int(len(data) / batch_size))]
@@ -396,11 +461,10 @@ def DAS_ExampleMnist(target_model: ExampleMnistAddModel, counterfactual_data_pat
             eval_metrics = compute_metrics(
                 counterfactual_outputs[0].detach(), batch["labels"].squeeze()
             )
-
-            # loss and backprop
-            loss = compute_loss(
-                counterfactual_outputs[0], batch["labels"].squeeze().to(torch.long)
-            )
+            # Get rotation params and calculate regularized loss
+            R_params = next(iter(intervenable.interventions.values()))[0].rotate_layer.weight  # R shape: [h_dim, h_dim] (expected 8x8)
+            loss = compute_loss(counterfactual_outputs[0], batch["labels"].squeeze().to(torch.long), R_params,
+                                binary_reg_weight, permutation_reg_weight)
 
             epoch_iterator.set_postfix({"loss": loss.item(), "acc": eval_metrics["accuracy"]})
 
@@ -411,6 +475,8 @@ def DAS_ExampleMnist(target_model: ExampleMnistAddModel, counterfactual_data_pat
                 optimizer.step()
                 intervenable.set_zero_grad()
             total_step += 1
+
+        scheduler.step()
 
     intervenable.model.eval()
     for key, intervention in intervenable.interventions.items():

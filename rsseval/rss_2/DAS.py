@@ -138,7 +138,7 @@ def init_intervenable(model_to_wrap):
     return intervenable
 
 
-def distributed_alignment_search(target_model, state_dict_path, counterfactual_data_path: str, args):
+def distributed_alignment_search(target_model, state_dict_path, counterfactual_data_path: str):
     """
     This method implements the Distributed Alignment Search (DAS) algorithm for MnistDPL or MnistNN. We want to see if the target model
     implements a high-level causal abstraction model to solve the MNIST addition task.
@@ -157,17 +157,17 @@ def distributed_alignment_search(target_model, state_dict_path, counterfactual_d
         target_model: MnistDPL or MnistNN model to be aligned with the causal abstraction
         state_dict_path: path to the state dictionary of the target model, if None, the target model is randomly initialized
         counterfactual_data_path (str): path to the counterfactual data (mapping of image indices to counterfactual predictions)
-        args: Containing further training parameters
 
     Call from terminal:
     python main.py --DAS --model mnistdpl --dataset addmnist --task addition --backbone conceptizer --checkin test_model_addmnist_mnistdpl.pth --batch_size 100
     """
 
-    # ============== Training parameters and config ==============
-    epochs = args.epochs
-    batch_size = args.bs
-    lr = 0.01
-    weight_decay = 0.001
+    # ============== Training parameters ===========================
+    epochs = 8
+    batch_size = 100  # Set this according to the bs in the counterfactual data!
+    lr = 0.02
+    lr_decay = 0.80
+    permutation_regularization = 0.02
     gradient_accumulation_steps = 1
     # ==============================================================
 
@@ -193,11 +193,13 @@ def distributed_alignment_search(target_model, state_dict_path, counterfactual_d
     train_mnist, val_mnist, _ = load_2MNIST(args=SimpleNamespace(task="addition"))
 
     # Optimizer: we only optimize the rotation parameters from DAS, the rest of the model is frozen.
-    optimizer_params = []
-    for k, v in intervenable.interventions.items():
-        optimizer_params += [{"params": v[0].rotate_layer.parameters()}]
-        break
-    optimizer = torch.optim.Adam(optimizer_params, lr=lr, weight_decay=weight_decay)
+    optimizer_params = [{"params": next(iter(intervenable.interventions.values()))[0].rotate_layer.parameters()}]
+    optimizer = torch.optim.Adam(optimizer_params, lr=lr)
+    scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=lr_decay)
+
+    # Check if batch size is compatible with counterfactual dataset batch size
+    if "bs" + str(batch_size) not in counterfactual_train:
+        raise Warning(f"DAS training bs is '{batch_size}', make sure it is the same batch size that is used for counterfactual data generation.")
 
     def compute_metrics(eval_preds, eval_labels):
         # Assuming eval_preds are raw logits of shape [batch_size, num_classes]
@@ -206,11 +208,55 @@ def distributed_alignment_search(target_model, state_dict_path, counterfactual_d
         accuracy = correct_count / eval_labels.size(0)
         return {"accuracy": accuracy, "correct": correct_count, "total": eval_labels.size(0)}
 
-    def compute_loss(outputs, labels):
-        # If labels are provided as one-hot, you might need to convert them:
-        # labels = torch.argmax(labels, dim=1)
-        ce_loss = torch.nn.CrossEntropyLoss()
-        return ce_loss(outputs, labels)
+    def compute_loss(outputs, labels, rotation, permutation_reg_factor, norm="fro"):
+        """
+        The loss is computed as combination of cross entropy and a permutation regularization term.
+        Goal of the regularization is to discourage "inner block permutations" within each sub block of the matrix.
+        In other words, within each block the matrix should behave close to an identity. Each element should ideally
+        remain in its own position (high diagonal entries) with minimal off-diagonals. Any deviation from that ideal
+        (non-zero off-diagonals) is considered an unnecessary permutation that, while functionally equivalent in
+        terms of the counterfactual outcome, distracts from interpretability (should be as binary as possible).
+
+        L=λ(∥R11−diag(R11)∥+∥R12−diag(R12)∥+∥R21−diag(R21)∥+∥R22−diag(R22)∥)
+        Args:
+            outputs: Counterfactual predictions
+            labels: Ground truth labels
+            rotation: Rotation matrix R
+            permutation_reg_factor: Hyperparameter to control the strength of the regularization
+            norm: How to compute the matrix norm, Frobenius norm is default
+
+        Returns: loss
+
+        """
+        # --- Main counterfactual loss ---
+        ce = torch.nn.CrossEntropyLoss()
+        ce_loss = ce(outputs, labels)
+
+        # --- Regularization loss on rotation matrix parameters ---
+        # Partition R into four blocks (R11, R12, R21, R22).
+        num_dims = rotation.shape[0]
+        half_dim = num_dims // 2  # here, half_dim should be 10.
+        R11 = rotation[:half_dim, :half_dim]
+        R12 = rotation[:half_dim, half_dim:]
+        R21 = rotation[half_dim:, :half_dim]
+        R22 = rotation[half_dim:, half_dim:]
+
+        # For each block, construct its diagonal matrix.
+        diag_R11 = torch.diag(torch.diag(R11))
+        diag_R12 = torch.diag(torch.diag(R12))
+        diag_R21 = torch.diag(torch.diag(R21))
+        diag_R22 = torch.diag(torch.diag(R22))
+
+        # Compute the regularization loss for each block.
+        reg_loss = (
+                torch.norm(R11 - diag_R11, p=norm) +
+                torch.norm(R12 - diag_R12, p=norm) +
+                torch.norm(R21 - diag_R21, p=norm) +
+                torch.norm(R22 - diag_R22, p=norm))
+
+        # Combine the main loss with the regularization term.
+        loss = ce_loss + permutation_reg_factor * reg_loss
+        return loss
 
     def batched_random_sampler(data):
         batch_indices = [i for i in range(int(len(data) / batch_size))]
@@ -221,19 +267,17 @@ def distributed_alignment_search(target_model, state_dict_path, counterfactual_d
 
     intervenable.model.train()  # set to train mode for DAS training
     print("Distributed Intervention Training, trainable parameters: ", intervenable.count_parameters())
-    train_iterator = trange(epochs, desc="Epoch")
 
+    iia = 0.0
     best_iia = 0.0  # Will store the best observed IIA (i.e., DII score)
     total_step = 0
-    for epoch in train_iterator:
-        epoch_iterator = tqdm(
-            DataLoader(
-                counterfactual_train_dataset,
-                batch_size=batch_size,
-                sampler=batched_random_sampler(counterfactual_train_dataset),
-            ),
-            desc=f"Epoch: {epoch}", position=0, leave=True
-        )
+
+    main_pbar = tqdm(total=epochs * len(counterfactual_train_dataset) // batch_size,
+                     desc="R Training", position=0, leave=True)
+
+    for epoch in range(epochs):
+        epoch_iterator = DataLoader(
+            counterfactual_train_dataset, batch_size=batch_size, sampler=batched_random_sampler(counterfactual_train_dataset))
         for batch in epoch_iterator:
             # Our counterfactual dataset is assumed to have the following keys:
             # "input_ids": the base image tensor(s)
@@ -260,13 +304,17 @@ def distributed_alignment_search(target_model, state_dict_path, counterfactual_d
             intervention_id = batch["intervention_id"][0]
             counterfactual_outputs = apply_intervention(intervenable, base_images, source_images, intervention_id, batch_size)
 
-            # Compute loss and metrics.
+            # Compute batch metrics
             eval_metrics = compute_metrics(counterfactual_outputs[0].detach(), batch["labels"].squeeze())
+            R_params = next(iter(intervenable.interventions.values()))[0].rotate_layer.weight  # R shape: [h_dim, h_dim] (expected 20x20)
+            loss = compute_loss(counterfactual_outputs[0], batch["labels"].squeeze().to(torch.long), R_params, permutation_regularization)
 
-            # loss and backprop
-            loss = compute_loss(counterfactual_outputs[0], batch["labels"].squeeze().to(torch.long))
-
-            epoch_iterator.set_postfix({"loss": loss.item(), "acc": eval_metrics["accuracy"]})
+            # Update the progress bar with batch metrics
+            main_pbar.set_postfix({"batch loss": f"{loss.item():.4f}", "batch acc": f"{eval_metrics['accuracy']:.4f}"})
+            main_pbar.set_postfix(
+                {"batch loss": f"{loss.item():.2f}", "batch acc": f"{eval_metrics['accuracy']:.2f}", "val IIA": f"{iia:.4f}",
+                 "DII score": f"{best_iia:.4f}"})
+            main_pbar.update(1)
 
             if gradient_accumulation_steps > 1:
                 loss = loss / gradient_accumulation_steps
@@ -276,15 +324,15 @@ def distributed_alignment_search(target_model, state_dict_path, counterfactual_d
                 intervenable.set_zero_grad()
             total_step += 1
 
-        """Evaluation after each epoch"""
+        scheduler.step()  # decay learning rate
 
+        """Validation after each epoch"""
         intervenable.model.eval()  # set model to evaluation mode
-        total_correct = 0
-        total_samples = 0
+        total_correct, total_samples = 0, 0
 
         eval_dataloader = DataLoader(counterfactual_val_dataset, batch_size=batch_size, shuffle=False)
         with torch.no_grad():
-            for batch in tqdm(eval_dataloader, desc=f"Validating Epoch {epoch}"):
+            for batch in eval_dataloader:
                 # Retrieve base images.
                 base_indices = batch["input_ids"].squeeze(1)
                 base_images = torch.stack([val_mnist[int(idx.item())][0] for idx in base_indices])
@@ -306,35 +354,36 @@ def distributed_alignment_search(target_model, state_dict_path, counterfactual_d
                 total_correct += metrics["correct"]
                 total_samples += metrics["total"]
 
-        epoch_accuracy = total_correct / total_samples if total_samples > 0 else 0.0
-        print(f"Epoch {epoch} Evaluation IIA: {epoch_accuracy:.4f}")
-
-        # Update the best IIA (DII score) if current epoch accuracy is higher.
-        if epoch_accuracy > best_iia:
-            best_iia = epoch_accuracy
-            # Retrieve the rotation matrix from the first intervention (adjust if needed)
-            for key, intervention in intervenable.interventions.items():
-                # intervention[0] contains the rotation module; get its weight parameter.
-                R = intervention[0].rotate_layer.weight.detach().cpu()
-                break  # We only need one rotation matrix
+        iia = total_correct / total_samples if total_samples > 0 else 0.0
+        is_new_best = iia > best_iia
+        # Update the best IIA (which we define as DII score) if current epoch accuracy is higher.
+        if is_new_best:
+            best_iia = iia
+            # Retrieve the rotation matrix stored in rotate_layer.weight of all interventions
+            R = next(iter(intervenable.interventions.values()))[0].rotate_layer.weight.detach().cpu()
             R_path = os.path.splitext(state_dict_path)[0] + "_R.bin"
             torch.save(R, R_path)
-            print("New best IIA achieved. Rotation matrix saved.")
 
-        # Switch back to training mode.
+        # Update progress bar with validation results
+        main_pbar.set_postfix(
+            {"batch loss": f"{loss.item():.2f}", "batch acc": f"{eval_metrics['accuracy']:.2f}", "val IIA": f"{iia:.4f}",
+             "DII score": f"{best_iia:.4f}"})
+
+        # Switch back to training mode
         intervenable.model.train()
 
+    main_pbar.update(1)
+    main_pbar.close()
     print(f"DII score of {state_dict_path} (highest IIA observed): {best_iia:.4f}")
 
 
-def eval_DAS_alignment(target_model, state_dict_path, bs: int, data_split: str, saved_R_path=None):
+def eval_DAS_alignment(target_model, state_dict_path, data_split: str, saved_R_path=None):
     """
     This method loads a target model with a trained rotation matrix and evaluates its alignment. How good is the target_model
     with the learned rotation matrix to predict counterfactual data (of different splits) produced by the causal abstraction model.
     Args:
         target_model: Model architecture to use
         state_dict_path: Trained target_model parameters
-        bs: Batch size to use when loading the counterfactual data. Important to have the same bs used for counterfactual data generation!
         data_split: "train", "val", "test" - Call with the same split used for counterfactual data generation to retrieve the correct images!
         saved_R_path: Path to the saved rotation matrix '.bin' file (torch saved tensor).
                       If None, try to find corresponding R given the state_dict_path
@@ -382,6 +431,14 @@ def eval_DAS_alignment(target_model, state_dict_path, bs: int, data_split: str, 
         counterfactual = counterfactual_test
     else:
         raise ValueError(f"Invalid split: {data_split}")
+
+    def extract_batch_size(path: str) -> int:
+        for part in path.replace('.', '_').split('_'):
+            if part.startswith('bs') and part[2:].isdigit():
+                return int(part[2:])
+        raise ValueError("Batch size not extracted from counterfactual data path")
+
+    bs = extract_batch_size(counterfactual)  # Assure we use the correct bs that was used for counterfactual data generation
 
     # Load the counterfactual data
     print(f"loading counterfactual {data_split} data")
@@ -454,18 +511,6 @@ if __name__ == "__main__":
         help="Set this flag accordingly to which model you want to load: Use joint architecture (PairsEncoder)."
              "If not set, SingleEncoder of digit images is used.",
     )
-    parser.add_argument(
-        "--bs",
-        type=int,
-        default=100,
-        help="Batch size of the counterfactual data sampling. Its important to have the same bs used for counterfactual data generation!",
-    )
-    parser.add_argument(
-        "--epochs",
-        type=int,
-        default=5,
-        help="How many epochs to train the rotation matrix",
-    )
     # Evaluation-specific arguments
     parser.add_argument(
         "--only_eval",
@@ -515,7 +560,6 @@ if __name__ == "__main__":
         eval_DAS_alignment(
             target_model=model,
             state_dict_path=pretrained_path,
-            bs=args.bs,
             data_split=args.data_split,
             saved_R_path=args.saved_R,
         )
@@ -529,5 +573,4 @@ if __name__ == "__main__":
             target_model=model,
             state_dict_path=pretrained_path,
             counterfactual_data_path=counterfactual_train,
-            args=args,
         )
