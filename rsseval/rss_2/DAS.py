@@ -167,7 +167,8 @@ def distributed_alignment_search(target_model, state_dict_path, counterfactual_d
     batch_size = 100  # Set this according to the bs in the counterfactual data!
     lr = 0.02
     lr_decay = 0.80
-    permutation_regularization = 0.02
+    binary_reg_weight = 0.005
+    permutation_reg_weight = 0.02
     gradient_accumulation_steps = 1
     # ==============================================================
 
@@ -208,31 +209,48 @@ def distributed_alignment_search(target_model, state_dict_path, counterfactual_d
         accuracy = correct_count / eval_labels.size(0)
         return {"accuracy": accuracy, "correct": correct_count, "total": eval_labels.size(0)}
 
-    def compute_loss(outputs, labels, rotation, permutation_reg_factor, norm="fro"):
+    def compute_loss(outputs, labels, rotation, binary_reg_weight, permutation_reg_weight):
         """
-        The loss is computed as combination of cross entropy and a permutation regularization term.
-        Goal of the regularization is to discourage "inner block permutations" within each sub block of the matrix.
-        In other words, within each block the matrix should behave close to an identity. Each element should ideally
-        remain in its own position (high diagonal entries) with minimal off-diagonals. Any deviation from that ideal
-        (non-zero off-diagonals) is considered an unnecessary permutation that, while functionally equivalent in
-        terms of the counterfactual outcome, distracts from interpretability (should be as binary as possible).
+        Computes the total loss as a combination of a data-dependent loss (Cross Entropy in this case) and two regularization terms:
 
-        L=λ(∥R11−diag(R11)∥+∥R12−diag(R12)∥+∥R21−diag(R21)∥+∥R22−diag(R22)∥)
+        1. Data Loss (Cross Entropy):
+            Measures the discrepancy between the counterfactual predictions and the ground truth labels.
+
+        2. Binary Regularization:
+            Encourages every element of the rotation matrix `R` to be near binary values (0 or 1).
+            The regularization term is defined as:
+            L_binary = sum((R_ij * (1 - R_ij))^2)
+            This term is zero when all R_ij are exactly 0 or 1 and positive otherwise.
+
+        3. Permutation Regularization:
+            Enforces an identity-like (or block-diagonal) structure on the rotation matrix by penalizing off-diagonal values
+            in each of its sub-blocks. Goal of the regularization is to discourage "inner block permutations" within each sub block of the matrix.
+            The matrix R is partitioned into blocks: R11, R12, R21, and R22.
+            For each block, the penalty is:
+            L_perm_block = || block - diag(block) ||_F
+
+        The overall loss is then:
+            L_total = L_ce + binary_reg_weight * L_binary + permutation_reg_weight * L_perm
+
         Args:
-            outputs: Counterfactual predictions
-            labels: Ground truth labels
-            rotation: Rotation matrix R
-            permutation_reg_factor: Hyperparameter to control the strength of the regularization
-            norm: How to compute the matrix norm, Frobenius norm is default
+            outputs (Tensor): Counterfactual predictions.
+            labels (Tensor): Ground truth labels.
+            rotation (Tensor): Rotation matrix R of shape (D, D).
+            binary_reg_weight (float): Weight for the binary regularization term.
+            permutation_reg_weight (float): Weight for the permutation regularization term.
 
-        Returns: loss
-
+        Returns:
+            Tensor: The computed total loss.
         """
-        # --- Main counterfactual loss ---
+        # --- Main counterfactual loss (cross entropy / mean square error) ---
         ce = torch.nn.CrossEntropyLoss()
-        ce_loss = ce(outputs, labels)
+        ce_loss = ce(outputs.squeeze(), labels.float())
 
-        # --- Regularization loss on rotation matrix parameters ---
+        # --- Binary regularization for all elements in R ---
+        # This term is 0 when an element is exactly 0 or 1, and positive otherwise.
+        binary_loss = torch.sum((rotation * (1 - rotation)) ** 2)
+
+        # --- Permutation regularization loss on all sub blocks in R ---
         # Partition R into four blocks (R11, R12, R21, R22).
         num_dims = rotation.shape[0]
         half_dim = num_dims // 2  # here, half_dim should be 10.
@@ -248,15 +266,15 @@ def distributed_alignment_search(target_model, state_dict_path, counterfactual_d
         diag_R22 = torch.diag(torch.diag(R22))
 
         # Compute the regularization loss for each block.
-        reg_loss = (
-                torch.norm(R11 - diag_R11, p=norm) +
-                torch.norm(R12 - diag_R12, p=norm) +
-                torch.norm(R21 - diag_R21, p=norm) +
-                torch.norm(R22 - diag_R22, p=norm))
+        permutation_loss = (
+                torch.norm(R11 - diag_R11, p="fro") +
+                torch.norm(R12 - diag_R12, p="fro") +
+                torch.norm(R21 - diag_R21, p="fro") +
+                torch.norm(R22 - diag_R22, p="fro"))
 
-        # Combine the main loss with the regularization term.
-        loss = ce_loss + permutation_reg_factor * reg_loss
-        return loss
+        # --- Total Loss ---
+        total_loss = ce_loss + binary_reg_weight * binary_loss + permutation_reg_weight * permutation_loss
+        return total_loss
 
     def batched_random_sampler(data):
         batch_indices = [i for i in range(int(len(data) / batch_size))]
@@ -307,7 +325,8 @@ def distributed_alignment_search(target_model, state_dict_path, counterfactual_d
             # Compute batch metrics
             eval_metrics = compute_metrics(counterfactual_outputs[0].detach(), batch["labels"].squeeze())
             R_params = next(iter(intervenable.interventions.values()))[0].rotate_layer.weight  # R shape: [h_dim, h_dim] (expected 20x20)
-            loss = compute_loss(counterfactual_outputs[0], batch["labels"].squeeze().to(torch.long), R_params, permutation_regularization)
+            loss = compute_loss(counterfactual_outputs[0], batch["labels"].squeeze().to(torch.long), R_params,
+                                binary_reg_weight, permutation_reg_weight)
 
             # Update the progress bar with batch metrics
             main_pbar.set_postfix({"batch loss": f"{loss.item():.4f}", "batch acc": f"{eval_metrics['accuracy']:.4f}"})

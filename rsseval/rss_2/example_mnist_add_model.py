@@ -310,7 +310,8 @@ def DAS_ExampleMnist(target_model: ExampleMnistAddModel, counterfactual_data_pat
 
         3. Permutation Regularization:
             Enforces an identity-like (or block-diagonal) structure on the rotation matrix by penalizing off-diagonal values
-            in each of its sub-blocks. The matrix R is partitioned into blocks: R11, R12, R21, and R22.
+            in each of its sub-blocks. Goal of the regularization is to discourage "inner block permutations" within each sub block of the matrix.
+            The matrix R is partitioned into blocks: R11, R12, R21, and R22.
             For each block, the penalty is:
             L_perm_block = || block - diag(block) ||_F
 
