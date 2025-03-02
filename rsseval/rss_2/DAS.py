@@ -19,6 +19,22 @@ from models import get_model
 from wrapped_models import WrappedMnistDPL, WrappedMnistNN
 
 
+class AlignmentHypothesis:
+    def __init__(self, i, h_dim=20):
+        """
+        This class encapsulates the subspace indices based on a given i.
+        It defines the alignment of a hidden layer with the causal abstraction variables C1 and C2.
+          - C1: dimensions [0, i)
+          - C2: dimensions [i, 2*i)
+          - None: dimensions [2*i, h_dim)
+        """
+        self.i = i
+        self.C1_dims = list(range(0, i))
+        self.C2_dims = list(range(i, 2 * i))
+        self.none_dims = list(range(2 * i, h_dim))
+        self.description = f"C1: {self.C1_dims}, C2: {self.C2_dims}, None: {self.none_dims}"
+
+
 def apply_intervention(intervenable, base_images, source_images, intervention_id, batch_size):
     """
     Helper function to apply the intervention based on the intervention_id.
@@ -138,7 +154,7 @@ def init_intervenable(model_to_wrap):
     return intervenable
 
 
-def distributed_alignment_search(target_model, state_dict_path, counterfactual_data_path: str):
+def distributed_alignment_search(target_model, state_dict_path):
     """
     This method implements the Distributed Alignment Search (DAS) algorithm for MnistDPL or MnistNN. We want to see if the target model
     implements a high-level causal abstraction model to solve the MNIST addition task.
@@ -156,7 +172,6 @@ def distributed_alignment_search(target_model, state_dict_path, counterfactual_d
     Args:
         target_model: MnistDPL or MnistNN model to be aligned with the causal abstraction
         state_dict_path: path to the state dictionary of the target model, if None, the target model is randomly initialized
-        counterfactual_data_path (str): path to the counterfactual data (mapping of image indices to counterfactual predictions)
 
     Call from terminal:
     python main.py --DAS --model mnistdpl --dataset addmnist --task addition --backbone conceptizer --checkin test_model_addmnist_mnistdpl.pth --batch_size 100
@@ -167,8 +182,8 @@ def distributed_alignment_search(target_model, state_dict_path, counterfactual_d
     batch_size = 100  # Set this according to the bs in the counterfactual data!
     lr = 0.02
     lr_decay = 0.80
-    binary_reg_weight = 0.005
-    permutation_reg_weight = 0.02
+    binary_reg_weight = 0.002  # Push every entry in the rotation matrix to be binary (0.0 or 1.0)
+    permutation_reg_weight = 0.02  # Push the matrix to solutions solution with less inner block permutation (off-diagonals are 0)
     gradient_accumulation_steps = 1
     # ==============================================================
 
@@ -184,14 +199,6 @@ def distributed_alignment_search(target_model, state_dict_path, counterfactual_d
 
     # Build the intervenable (pyvene) model
     intervenable = init_intervenable(target_model)
-
-    # Load the counterfactual data
-    print("loading counterfactual data")
-    counterfactual_train_dataset = torch.load(counterfactual_data_path, weights_only=True)
-    counterfactual_val_dataset = torch.load(counterfactual_val, weights_only=True)
-
-    # Load the dataset to retrieve image tensors
-    train_mnist, val_mnist, _ = load_2MNIST(args=SimpleNamespace(task="addition"))
 
     # Optimizer: we only optimize the rotation parameters from DAS, the rest of the model is frozen.
     optimizer_params = [{"params": next(iter(intervenable.interventions.values()))[0].rotate_layer.parameters()}]
@@ -244,13 +251,14 @@ def distributed_alignment_search(target_model, state_dict_path, counterfactual_d
         """
         # --- Main counterfactual loss (cross entropy / mean square error) ---
         ce = torch.nn.CrossEntropyLoss()
-        ce_loss = ce(outputs.squeeze(), labels.float())
+        ce_loss = ce(outputs, labels)
 
         # --- Binary regularization for all elements in R ---
         # This term is 0 when an element is exactly 0 or 1, and positive otherwise.
         binary_loss = torch.sum((rotation * (1 - rotation)) ** 2)
 
         # --- Permutation regularization loss on all sub blocks in R ---
+        # TODO change to 3 sub blocks responsible for C1, C2 including the None block
         # Partition R into four blocks (R11, R12, R21, R22).
         num_dims = rotation.shape[0]
         half_dim = num_dims // 2  # here, half_dim should be 10.
@@ -396,6 +404,62 @@ def distributed_alignment_search(target_model, state_dict_path, counterfactual_d
     print(f"DII score of {state_dict_path} (highest IIA observed): {best_iia:.4f}")
 
 
+def iterate_hypothesis(target_model, state_dict_path, counterfactual_data_path, model_name, output_base_dir="."):
+    """
+    Create a directory for the given model name, copy the pretrained model there,
+    and iterate over different alignment hypotheses. For each hypothesis it calls distributed_alignment_search(),
+    logs the best DII score and saves the best rotation matrix.
+
+    A CSV file with one row per hypothesis is saved in the model directory.
+    """
+    # Create output directory based on model_name (e.g., "mnistdpl_SingleEncoder_0.0")
+    model_dir = os.path.join(output_base_dir, model_name)
+    os.makedirs(model_dir, exist_ok=True)
+
+    # Copy pretrained model to model_dir as model.pth (if available)
+    if os.path.isfile(state_dict_path):
+        shutil.copy(state_dict_path, os.path.join(model_dir, "model.pth"))
+    else:
+        print("State dict path does not exist as a file. Skipping copy of model.pth.")
+
+    results = []
+
+    # Iterate over hypotheses: i from 1 to 10
+    for i in range(1, 11):
+        hypothesis = AlignmentHypothesis(i)
+        print(f"Evaluating hypothesis {i}: {hypothesis.description}")
+
+        # Call DAS with the current hypothesis.
+        # The modified DAS accepts an optional alignment_hypothesis as well as output parameters.
+        best_iia, R_path = distributed_alignment_search(
+            target_model,
+            state_dict_path,
+            counterfactual_data_path,
+            alignment_hypothesis=hypothesis,
+            save_dir=model_dir,
+            hypothesis_id=i
+        )
+
+        results.append({
+            "hypothesis_id": i,
+            "C1_dims": hypothesis.C1_dims,
+            "C2_dims": hypothesis.C2_dims,
+            "DII_score": best_iia,
+            "R_path": R_path
+        })
+
+    # Write the results to a CSV file inside the model directory.
+    csv_path = os.path.join(model_dir, "alignment_results.csv")
+    with open(csv_path, mode="w", newline="") as csv_file:
+        fieldnames = ["hypothesis_id", "C1_dims", "C2_dims", "DII_score", "R_path"]
+        writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in results:
+            writer.writerow(row)
+
+    print(f"Alignment evaluation complete. Results saved to {csv_path}")
+
+
 def eval_DAS_alignment(target_model, state_dict_path, data_split: str, saved_R_path=None):
     """
     This method loads a target model with a trained rotation matrix and evaluates its alignment. How good is the target_model
@@ -403,7 +467,7 @@ def eval_DAS_alignment(target_model, state_dict_path, data_split: str, saved_R_p
     Args:
         target_model: Model architecture to use
         state_dict_path: Trained target_model parameters
-        data_split: "train", "val", "test" - Call with the same split used for counterfactual data generation to retrieve the correct images!
+        data_split: "train", "val", "test" data split to evaluate on
         saved_R_path: Path to the saved rotation matrix '.bin' file (torch saved tensor).
                       If None, try to find corresponding R given the state_dict_path
 
@@ -440,13 +504,13 @@ def eval_DAS_alignment(target_model, state_dict_path, data_split: str, saved_R_p
 
     # Load the dataset to retrieve image tensors based on the split.
     if data_split == 'train':
-        dataset, _, _ = load_2MNIST(args=SimpleNamespace(task="addition"))
+        mnist = train_mnist
         counterfactual = counterfactual_train
     elif data_split == 'val':
-        _, dataset, _ = load_2MNIST(args=SimpleNamespace(task="addition"))
+        mnist = val_mnist
         counterfactual = counterfactual_val
     elif data_split == 'test':
-        _, _, dataset = load_2MNIST(args=SimpleNamespace(task="addition"))
+        mnist = test_mnist
         counterfactual = counterfactual_test
     else:
         raise ValueError(f"Invalid split: {data_split}")
@@ -470,13 +534,13 @@ def eval_DAS_alignment(target_model, state_dict_path, data_split: str, saved_R_p
         for batch in tqdm(eval_dataloader, desc=f"Evaluating"):
             # Retrieve base images.
             base_indices = batch["input_ids"].squeeze(1)
-            base_images = torch.stack([dataset[int(idx.item())][0] for idx in base_indices])
+            base_images = torch.stack([mnist[int(idx.item())][0] for idx in base_indices])
 
             # Retrieve source images.
             source_indices = batch["source_input_ids"].squeeze(2)
             source_images = []
             for pos in range(source_indices.shape[1]):
-                imgs = torch.stack([dataset[int(idx.item())][0] for idx in source_indices[:, pos]])
+                imgs = torch.stack([mnist[int(idx.item())][0] for idx in source_indices[:, pos]])
                 source_images.append(imgs)
 
             # Apply the intervention.
@@ -556,6 +620,9 @@ if __name__ == "__main__":
     n_images, c_split = dataset.get_split()  # Based on args.joint True or False: n_images= 1 or 2 c_split= (10, 10) or (10,)
     model = get_model(args, encoder, decoder, n_images, c_split)
 
+    # Load Mnist images
+    train_mnist, val_mnist, test_mnist = load_2MNIST(args=SimpleNamespace(task="addition"))
+
     # Your path to the counterfactual data (mapping of image indices to counterfactual predictions) to evaluate DAS on
     counterfactual_train = "data/mnist_add_counterfactual_train_data_bs100.pt"
     counterfactual_val = "data/mnist_add_counterfactual_val_data_bs100.pt"
@@ -588,8 +655,11 @@ if __name__ == "__main__":
         Example call:
         python DAS.py --pretrained trained_models/mnistdpl_MNISTPairsEncoder_0.0_None.pth --joint
         """
+        # Load the needed counterfactual data
+        print("loading counterfactual data")
+        counterfactual_train_dataset = torch.load(counterfactual_train, weights_only=True)
+        counterfactual_val_dataset = torch.load(counterfactual_val, weights_only=True)
         distributed_alignment_search(
             target_model=model,
             state_dict_path=pretrained_path,
-            counterfactual_data_path=counterfactual_train,
         )
