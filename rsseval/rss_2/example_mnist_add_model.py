@@ -266,14 +266,14 @@ def DAS_ExampleMnist(target_model: ExampleMnistAddModel, counterfactual_data_pat
     intervenable.disable_model_gradients()
 
     # Training parameters for the rotation matrix
-    epochs = 10
+    epochs = 20
     batch_size = 100  # Set this according to the bs in the counterfactual data!
     lr = 0.02
     lr_decay = 0.90
-    binary_reg_weight = 0.2
-    permutation_reg_weight = 1
+    binary_reg_weight = 0.1
+    permutation_reg_weight = 0  # Not used
     gradient_accumulation_steps = 1
-    R_save_path = "trained_models/ExampleMnistAddModel_R.bin"
+    R_save_path = "trained_models/mnist_example_R.bin"
 
     # Optimizer: we only optimize the rotation parameters from DAS.
     optimizer_params = []
@@ -359,7 +359,10 @@ def DAS_ExampleMnist(target_model: ExampleMnistAddModel, counterfactual_data_pat
                 torch.norm(R22 - diag_R22, p="fro"))
 
         # --- Total Loss ---
-        total_loss = mse_loss + binary_reg_weight * binary_loss + permutation_reg_weight * permutation_loss
+        if epoch > 5:
+            total_loss = mse_loss + binary_reg_weight * binary_loss + permutation_reg_weight * permutation_loss
+        else:
+            total_loss = mse_loss
         return total_loss
 
     def batched_random_sampler(data):
@@ -641,7 +644,7 @@ def eval_DAS_alignment(counterfactual_data_path: str, bs: int, data_split: str, 
 
 # Example usage:
 if __name__ == '__main__':
-    # model = ExampleMnistAddModel(data_split="train")
+    model = ExampleMnistAddModel(data_split="train")
     # pv_model = PyveneWrapped(model)
 
     # Test on a batch of indices.
@@ -650,6 +653,6 @@ if __name__ == '__main__':
     # outputs = pv_model(torch.tensor(batch_indices))
     # print(f"Output: {outputs}")
 
-    # DAS_ExampleMnist(target_model=model, counterfactual_data_path="data/mnist_add_counterfactual_train_data_bs100.pt")
+    DAS_ExampleMnist(target_model=model, counterfactual_data_path="data/mnist_add_counterfactual_train_data_bs100.pt")
     eval_DAS_alignment(counterfactual_data_path="data/mnist_add_counterfactual_val_data_bs100.pt", bs=100, data_split="val",
-                       saved_R_path="trained_models/ExampleMnistAddModel_R.bin")
+                       saved_R_path="trained_models/mnist_example_R.bin")

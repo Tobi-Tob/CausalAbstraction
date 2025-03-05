@@ -1,10 +1,13 @@
 import argparse
+import csv
 import os
 import random
+import re
+import shutil
 from types import SimpleNamespace
 import torch
-from tqdm import tqdm, trange
-from torch.utils.data import Dataset, DataLoader
+from tqdm import tqdm
+from torch.utils.data import DataLoader
 from sklearn.metrics import classification_report
 
 from datasets.utils.mnist_creation import load_2MNIST
@@ -28,14 +31,15 @@ class AlignmentHypothesis:
           - C2: dimensions [i, 2*i)
           - None: dimensions [2*i, h_dim)
         """
-        self.i = i
+        self.id = i
+        self.h_dim = h_dim
         self.C1_dims = list(range(0, i))
         self.C2_dims = list(range(i, 2 * i))
         self.none_dims = list(range(2 * i, h_dim))
         self.description = f"C1: {self.C1_dims}, C2: {self.C2_dims}, None: {self.none_dims}"
 
 
-def apply_intervention(intervenable, base_images, source_images, intervention_id, batch_size):
+def apply_intervention(intervenable, base_images, source_images, intervention_id, batch_size, alignment_hypothesis):
     """
     Helper function to apply the intervention based on the intervention_id.
     Same intervention_id in the whole batch assumed!
@@ -45,12 +49,13 @@ def apply_intervention(intervenable, base_images, source_images, intervention_id
         source_images: A list of tensors, one per source position.
         intervention_id: An integer (0, 1, or 2) indicating the intervention type.
         batch_size: The batch size (used for constructing mapping lists).
-
+        alignment_hypothesis: AlignmentHypothesis object that defines the subspaces to intervene on.
     Returns:
         The counterfactual outputs from the intervenable model.
     """
-    h_dim = intervenable.model.h_dim
-    subspace_idx = int(h_dim / 2)
+    C1_dims = alignment_hypothesis.C1_dims
+    C2_dims = alignment_hypothesis.C2_dims
+    assert intervenable.model.h_dim == alignment_hypothesis.h_dim  # assumed to be 20
     if intervention_id == 2:
         # intervene on neurons aligned with C1 by overwriting with the activations from source_images[0] and C2 with source_images[1]
         _, outputs = intervenable(
@@ -65,9 +70,9 @@ def apply_intervention(intervenable, base_images, source_images, intervention_id
                     [[[0]] * batch_size, [[0]] * batch_size],
                 )
             },
-            subspaces=[  # Define the subspace of neurons to target. We align the first half of h_dim to C1 and the second half to C2
-                [[i for i in range(0, subspace_idx)]] * batch_size,
-                [[i for i in range(subspace_idx, h_dim)]] * batch_size,
+            subspaces=[  # Define the subspace of neurons to target using the indices given by the hypothesis
+                [C1_dims] * batch_size,
+                [C2_dims] * batch_size,
             ],
         )
     elif intervention_id == 0:
@@ -82,7 +87,7 @@ def apply_intervention(intervenable, base_images, source_images, intervention_id
                 )
             },
             subspaces=[
-                [[i for i in range(0, subspace_idx)]] * batch_size,
+                [C1_dims] * batch_size,
                 None,
             ],
         )
@@ -99,7 +104,7 @@ def apply_intervention(intervenable, base_images, source_images, intervention_id
             },
             subspaces=[
                 None,
-                [[i for i in range(subspace_idx, h_dim)]] * batch_size,
+                [C2_dims] * batch_size,
             ],
         )
     else:
@@ -154,7 +159,7 @@ def init_intervenable(model_to_wrap):
     return intervenable
 
 
-def distributed_alignment_search(target_model, state_dict_path):
+def distributed_alignment_search(target_model, state_dict_path, alignment_hypothesis=AlignmentHypothesis(10), save_dir=None):
     """
     This method implements the Distributed Alignment Search (DAS) algorithm for MnistDPL or MnistNN. We want to see if the target model
     implements a high-level causal abstraction model to solve the MNIST addition task.
@@ -172,6 +177,8 @@ def distributed_alignment_search(target_model, state_dict_path):
     Args:
         target_model: MnistDPL or MnistNN model to be aligned with the causal abstraction
         state_dict_path: path to the state dictionary of the target model, if None, the target model is randomly initialized
+        alignment_hypothesis: AlignmentHypothesis object that defines the subspaces to intervene on. Default is C1 in index [0,9] and C2 in [10,19]
+        save_dir: Optional argument where to save the matrix R, if non it is saved next to the model state_dict
 
     Call from terminal:
     python main.py --DAS --model mnistdpl --dataset addmnist --task addition --backbone conceptizer --checkin test_model_addmnist_mnistdpl.pth --batch_size 100
@@ -182,8 +189,8 @@ def distributed_alignment_search(target_model, state_dict_path):
     batch_size = 100  # Set this according to the bs in the counterfactual data!
     lr = 0.02
     lr_decay = 0.80
-    binary_reg_weight = 0.002  # Push every entry in the rotation matrix to be binary (0.0 or 1.0)
-    permutation_reg_weight = 0.02  # Push the matrix to solutions solution with less inner block permutation (off-diagonals are 0)
+    binary_reg_weight = 0.005  # Push every entry in the rotation matrix to be binary (0.0 or 1.0)
+    permutation_reg_weight = 0.0  # Removed... Push the matrix to solutions solution with less inner block permutation (off-diagonals are 0)
     gradient_accumulation_steps = 1
     # ==============================================================
 
@@ -258,30 +265,10 @@ def distributed_alignment_search(target_model, state_dict_path):
         binary_loss = torch.sum((rotation * (1 - rotation)) ** 2)
 
         # --- Permutation regularization loss on all sub blocks in R ---
-        # TODO change to 3 sub blocks responsible for C1, C2 including the None block
-        # Partition R into four blocks (R11, R12, R21, R22).
-        num_dims = rotation.shape[0]
-        half_dim = num_dims // 2  # here, half_dim should be 10.
-        R11 = rotation[:half_dim, :half_dim]
-        R12 = rotation[:half_dim, half_dim:]
-        R21 = rotation[half_dim:, :half_dim]
-        R22 = rotation[half_dim:, half_dim:]
-
-        # For each block, construct its diagonal matrix.
-        diag_R11 = torch.diag(torch.diag(R11))
-        diag_R12 = torch.diag(torch.diag(R12))
-        diag_R21 = torch.diag(torch.diag(R21))
-        diag_R22 = torch.diag(torch.diag(R22))
-
-        # Compute the regularization loss for each block.
-        permutation_loss = (
-                torch.norm(R11 - diag_R11, p="fro") +
-                torch.norm(R12 - diag_R12, p="fro") +
-                torch.norm(R21 - diag_R21, p="fro") +
-                torch.norm(R22 - diag_R22, p="fro"))
+        # removed...
 
         # --- Total Loss ---
-        total_loss = ce_loss + binary_reg_weight * binary_loss + permutation_reg_weight * permutation_loss
+        total_loss = ce_loss + binary_reg_weight * binary_loss
         return total_loss
 
     def batched_random_sampler(data):
@@ -292,14 +279,14 @@ def distributed_alignment_search(target_model, state_dict_path):
                 yield i
 
     intervenable.model.train()  # set to train mode for DAS training
-    print("Distributed Intervention Training, trainable parameters: ", intervenable.count_parameters())
+    # print("Distributed Intervention Training, trainable parameters: ", intervenable.count_parameters())
 
     iia = 0.0
     best_iia = 0.0  # Will store the best observed IIA (i.e., DII score)
     total_step = 0
 
     main_pbar = tqdm(total=epochs * len(counterfactual_train_dataset) // batch_size,
-                     desc="R Training", position=0, leave=True)
+                     desc=f"R Training, Hypothesis {alignment_hypothesis.id}", position=0, leave=True)
 
     for epoch in range(epochs):
         epoch_iterator = DataLoader(
@@ -328,7 +315,8 @@ def distributed_alignment_search(target_model, state_dict_path):
 
             # Call the intervenable model depending on the intervention_id.
             intervention_id = batch["intervention_id"][0]
-            counterfactual_outputs = apply_intervention(intervenable, base_images, source_images, intervention_id, batch_size)
+
+            counterfactual_outputs = apply_intervention(intervenable, base_images, source_images, intervention_id, batch_size, alignment_hypothesis)
 
             # Compute batch metrics
             eval_metrics = compute_metrics(counterfactual_outputs[0].detach(), batch["labels"].squeeze())
@@ -374,7 +362,7 @@ def distributed_alignment_search(target_model, state_dict_path):
                 # Apply the intervention.
                 intervention_id = batch["intervention_id"][0]
                 counterfactual_outputs = apply_intervention(
-                    intervenable, base_images, source_images, intervention_id, batch_size)
+                    intervenable, base_images, source_images, intervention_id, batch_size, alignment_hypothesis)
 
                 # Compute metrics for this batch.
                 metrics = compute_metrics(counterfactual_outputs[0], batch["labels"].squeeze())
@@ -388,7 +376,10 @@ def distributed_alignment_search(target_model, state_dict_path):
             best_iia = iia
             # Retrieve the rotation matrix stored in rotate_layer.weight of all interventions
             R = next(iter(intervenable.interventions.values()))[0].rotate_layer.weight.detach().cpu()
-            R_path = os.path.splitext(state_dict_path)[0] + "_R.bin"
+            if save_dir is not None:
+                R_path = os.path.join(save_dir, f"R{alignment_hypothesis.id}.bin")
+            else:
+                R_path = os.path.splitext(state_dict_path)[0] + f"_R{alignment_hypothesis.id}.bin"
             torch.save(R, R_path)
 
         # Update progress bar with validation results
@@ -401,10 +392,11 @@ def distributed_alignment_search(target_model, state_dict_path):
 
     main_pbar.update(1)
     main_pbar.close()
-    print(f"DII score of {state_dict_path} (highest IIA observed): {best_iia:.4f}")
+    print(f"DII score {best_iia:.4f} ({state_dict_path}) with hypothesis {alignment_hypothesis.id}: {alignment_hypothesis.description})")
+    return best_iia, R_path
 
 
-def iterate_hypothesis(target_model, state_dict_path, counterfactual_data_path, model_name, output_base_dir="."):
+def iterate_hypothesis(target_model, state_dict_path, hypotheses_to_test=range(1, 11), base_dir="trained_models"):
     """
     Create a directory for the given model name, copy the pretrained model there,
     and iterate over different alignment hypotheses. For each hypothesis it calls distributed_alignment_search(),
@@ -412,8 +404,12 @@ def iterate_hypothesis(target_model, state_dict_path, counterfactual_data_path, 
 
     A CSV file with one row per hypothesis is saved in the model directory.
     """
-    # Create output directory based on model_name (e.g., "mnistdpl_SingleEncoder_0.0")
-    model_dir = os.path.join(output_base_dir, model_name)
+    # Create output directory describing the used method and architecture
+    dir_name = f"{args.model}_pairs" if args.joint else f"{args.model}_single"
+    if "csup" in state_dict_path:
+        dir_name += "_csup"
+
+    model_dir = os.path.join(base_dir, dir_name)
     os.makedirs(model_dir, exist_ok=True)
 
     # Copy pretrained model to model_dir as model.pth (if available)
@@ -424,8 +420,8 @@ def iterate_hypothesis(target_model, state_dict_path, counterfactual_data_path, 
 
     results = []
 
-    # Iterate over hypotheses: i from 1 to 10
-    for i in range(1, 11):
+    # Iterate over hypotheses: range(1, 11) -> i from 1 to 10
+    for i in hypotheses_to_test:
         hypothesis = AlignmentHypothesis(i)
         print(f"Evaluating hypothesis {i}: {hypothesis.description}")
 
@@ -434,14 +430,12 @@ def iterate_hypothesis(target_model, state_dict_path, counterfactual_data_path, 
         best_iia, R_path = distributed_alignment_search(
             target_model,
             state_dict_path,
-            counterfactual_data_path,
             alignment_hypothesis=hypothesis,
-            save_dir=model_dir,
-            hypothesis_id=i
+            save_dir=model_dir
         )
 
         results.append({
-            "hypothesis_id": i,
+            "hypothesis_id": hypothesis.id,
             "C1_dims": hypothesis.C1_dims,
             "C2_dims": hypothesis.C2_dims,
             "DII_score": best_iia,
@@ -451,13 +445,13 @@ def iterate_hypothesis(target_model, state_dict_path, counterfactual_data_path, 
     # Write the results to a CSV file inside the model directory.
     csv_path = os.path.join(model_dir, "alignment_results.csv")
     with open(csv_path, mode="w", newline="") as csv_file:
-        fieldnames = ["hypothesis_id", "C1_dims", "C2_dims", "DII_score", "R_path"]
+        fieldnames = ["hypothesis_id", "DII_score", "C1_dims", "C2_dims", "R_path"]
         writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
         writer.writeheader()
         for row in results:
             writer.writerow(row)
 
-    print(f"Alignment evaluation complete. Results saved to {csv_path}")
+    print(f"Iterate over all hypothesis complete. Results saved to {csv_path}")
 
 
 def eval_DAS_alignment(target_model, state_dict_path, data_split: str, saved_R_path=None):
@@ -521,7 +515,16 @@ def eval_DAS_alignment(target_model, state_dict_path, data_split: str, saved_R_p
                 return int(part[2:])
         raise ValueError("Batch size not extracted from counterfactual data path")
 
+    def extract_hypothesis(path: str) -> int:
+        parts = re.split(r"[._/-]+", path)
+        for part in parts:
+            if part.startswith('R') and part[1:].isdigit():
+                return int(part[1:])
+
+        raise ValueError("Hypothesis ID not extracted from saved R path")
+
     bs = extract_batch_size(counterfactual)  # Assure we use the correct bs that was used for counterfactual data generation
+    alignment_hypothesis = AlignmentHypothesis(extract_hypothesis(saved_R_path))  # Get AlignmentHypothesis used for this R
 
     # Load the counterfactual data
     print(f"loading counterfactual {data_split} data")
@@ -546,7 +549,7 @@ def eval_DAS_alignment(target_model, state_dict_path, data_split: str, saved_R_p
             # Apply the intervention.
             intervention_id = batch["intervention_id"][0]
             counterfactual_outputs = apply_intervention(
-                intervenable, base_images, source_images, intervention_id, bs)
+                intervenable, base_images, source_images, intervention_id, bs, alignment_hypothesis)
 
             # Compute metrics for this batch.
             eval_labels += [batch["labels"]]
@@ -593,6 +596,11 @@ if __name__ == "__main__":
         action="store_true",
         help="Set this flag accordingly to which model you want to load: Use joint architecture (PairsEncoder)."
              "If not set, SingleEncoder of digit images is used.",
+    )
+    parser.add_argument(
+        "--iterate_hyp",
+        action="store_true",
+        help="If set, run multiple iterations of DAS to evaluate a range of alignment hypothesis",
     )
     # Evaluation-specific arguments
     parser.add_argument(
@@ -641,7 +649,7 @@ if __name__ == "__main__":
         """
         Evaluate the alignment using the learned rotation matrix.
         Example call:
-        python DAS.py --only_eval --pretrained trained_models/mnistdpl_MNISTPairsEncoder_0.0_None.pth --joint --data_split val
+        python DAS.py --only_eval --pretrained trained_models/mnistdpl_MNISTPairsEncoder.pth --joint --data_split val
         """
         eval_DAS_alignment(
             target_model=model,
@@ -649,14 +657,27 @@ if __name__ == "__main__":
             data_split=args.data_split,
             saved_R_path=args.saved_R,
         )
+    elif args.iterate_hyp:
+        """
+        Use DAS multiple times to iterate over a range of alignment hypothesis
+        Example call:
+        python DAS.py --iterate_hyp --pretrained trained_models/mnistdpl_MNISTPairsEncoder.pth --joint
+        """
+        print("Loading counterfactual data")
+        counterfactual_train_dataset = torch.load(counterfactual_train, weights_only=True)
+        counterfactual_val_dataset = torch.load(counterfactual_val, weights_only=True)
+        iterate_hypothesis(
+            target_model=model,
+            state_dict_path=pretrained_path,
+        )
     else:
         """
         Train the rotation matrix using DAS.
         Example call:
-        python DAS.py --pretrained trained_models/mnistdpl_MNISTPairsEncoder_0.0_None.pth --joint
+        python DAS.py --pretrained trained_models/mnistdpl_MNISTPairsEncoder.pth --joint
         """
         # Load the needed counterfactual data
-        print("loading counterfactual data")
+        print("Loading counterfactual data")
         counterfactual_train_dataset = torch.load(counterfactual_train, weights_only=True)
         counterfactual_val_dataset = torch.load(counterfactual_val, weights_only=True)
         distributed_alignment_search(

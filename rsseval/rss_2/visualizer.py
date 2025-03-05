@@ -1,9 +1,12 @@
 import os
+import re
+
 import numpy as np
 import torch
 from numpy import linalg as LA
 import seaborn as sns
 import matplotlib.pyplot as plt
+from DAS import AlignmentHypothesis
 
 
 def eigenvalues_to_angles(eigenvalues):
@@ -46,6 +49,20 @@ def check_orthogonality(R, tol=1e-6):
     is_orthonormal = is_orthogonal and np.allclose(column_norms, 1.0, atol=tol)
 
     return is_orthogonal, is_orthonormal
+
+
+def extract_hypothesis(path: str) -> int:
+    """
+    Extracts the hypothesis ID from the file path.
+    Assumes the file name contains a segment like "R10" where 10 is the hypothesis ID.
+    If no such segment is found, returns None.
+    """
+    # Split the path using '.', '_', '/' or '-' as delimiters.
+    parts = re.split(r"[._/-]+", path)
+    for part in parts:
+        if part.startswith('R') and part[1:].isdigit():
+            return int(part[1:])
+    return None
 
 
 def visualize_rotation_degrees(saved_R_path: str):
@@ -133,6 +150,11 @@ def visualize_rotation_matrix(saved_R_path: str):
     and saves the heatmap image. The color scale is fixed to [-1, 1]
     so that 0 appears near white and large negative/positive values
     show strong colors.
+    The tick labels on the x and y axes (which represent the row/column indices)
+    are colored according to the alignment hypothesis:
+      - Red for indices belonging to C1
+      - Blue for indices belonging to C2
+      - Grey for indices corresponding to None
 
     Args:
         saved_R_path (str): Path to the saved rotation matrix '.bin' file (torch saved tensor).
@@ -141,13 +163,20 @@ def visualize_rotation_matrix(saved_R_path: str):
     # If your torch.save call didn't use `weights_only=True`, remove that argument below
     R = torch.load(saved_R_path, weights_only=True).cpu().detach().numpy()
 
+    # Attempt to extract the hypothesis ID
+    hypothesis_id = extract_hypothesis(saved_R_path)
+    # If no ID is extracted, assume full concept split: i = h_dim // 2
+    if hypothesis_id is None:
+        hypothesis_id = R.shape[0] // 2  # Assumes even h_dim
+    # Create the AlignmentHypothesis object using the determined ID.
+    alignment_hypothesis = AlignmentHypothesis(hypothesis_id, h_dim=R.shape[0])
+
     # Check matrix properties
     is_orthogonal, is_orthonormal = check_orthogonality(R)
 
     # Create a heatmap of the rotation matrix using a diverging colormap
-    # 'seismic' has white around zero, red for negative, blue for positive
     plt.figure(figsize=(8, 6))
-    sns.heatmap(
+    ax = sns.heatmap(
         R,
         cmap="coolwarm",
         cbar=True,
@@ -161,6 +190,32 @@ def visualize_rotation_matrix(saved_R_path: str):
     plt.title("Heatmap of the Rotation Matrix")
     plt.xlabel("Columns")
     plt.ylabel("Rows")
+
+    # Color the tick labels on the x-axis.
+    for tick in ax.get_xticklabels():
+        try:
+            idx = int(tick.get_text())
+        except ValueError:
+            continue  # Skip if the text cannot be converted to an integer.
+        if idx in alignment_hypothesis.C1_dims:
+            tick.set_color("red")
+        elif idx in alignment_hypothesis.C2_dims:
+            tick.set_color("blue")
+        else:
+            tick.set_color("grey")
+
+    # Color the tick labels on the y-axis.
+    for tick in ax.get_yticklabels():
+        try:
+            idx = int(tick.get_text())
+        except ValueError:
+            continue
+        if idx in alignment_hypothesis.C1_dims:
+            tick.set_color("red")
+        elif idx in alignment_hypothesis.C2_dims:
+            tick.set_color("blue")
+        else:
+            tick.set_color("grey")
 
     # Add matrix properties as text below the heatmap
     text_props = f"Orthogonal: {is_orthogonal}\nOrthonormal: {is_orthonormal}"
@@ -176,9 +231,8 @@ def visualize_rotation_matrix(saved_R_path: str):
 
 def visualize_concept_contribution(saved_R_path: str):
     """
-    Loads a square rotation matrix R, computes each original dimension's
-    contribution to concept C1 (sum of absolute values in columns 0..half-1) and C2 (columns half..end),
-    then produces a stacked bar chart (red=C1, blue=C2).
+    Loads a square rotation matrix R, computes each original dimension's contribution to concepts C1, C2, and None,
+    then produces a stacked bar chart with red=C1, blue=C2, and grey=None.
 
     Visualization idea:
     We have a concept vector (representing the neural activations before rotation), and a rotation matrix R that,
@@ -199,43 +253,50 @@ def visualize_concept_contribution(saved_R_path: str):
     # Ensure it's a square matrix
     num_dims = R.shape[0]
     assert R.shape[0] == R.shape[1], "Rotation matrix R must be square (NxN)."
-    half = num_dims // 2
 
-    # Prepare arrays to store normalized contributions for each dimension
+    # Extract hypothesis ID; if not found, assume full concept split: i = num_dims // 2.
+    hypothesis_id = extract_hypothesis(saved_R_path)
+    if hypothesis_id is None:
+        hypothesis_id = num_dims // 2
+    # Create an AlignmentHypothesis object with h_dim equal to the matrix dimension.
+    alignment_hypothesis = AlignmentHypothesis(hypothesis_id, h_dim=num_dims)
+
+    # Initialize arrays to store contributions per original dimension.
     c1_contribution = np.zeros(num_dims)
     c2_contribution = np.zeros(num_dims)
+    none_contribution = np.zeros(num_dims)
 
-    # For each original dimension i, look at row i of R (in the equation xR=y)
-    # Row i of R indicates how x[i] influences each output dimension y[j].
-    # The first half of columns (0..half-1) correspond to C1, last half to C2.
+    # For each original dimension i (i.e., each row of R), compute contributions.
     for i in range(num_dims):
         row_i = R[i, :]
+        # Sum of contributions for each concept based on the hypothesis split.
+        sum_c1 = np.sum(row_i[alignment_hypothesis.C1_dims]**2) if alignment_hypothesis.C1_dims else 0.0
+        sum_c2 = np.sum(row_i[alignment_hypothesis.C2_dims]**2) if alignment_hypothesis.C2_dims else 0.0
+        sum_none = np.sum(row_i[alignment_hypothesis.none_dims]**2) if alignment_hypothesis.none_dims else 0.0
 
-        # Sum absolute values for the columns in the C1 subspace vs. C2 subspace
-        c1_contribution_of_dim_i = np.sum(np.abs(row_i[:half]))  # C1
-        c2_contribution_of_dim_i = np.sum(np.abs(row_i[half:]))  # C2
+        total = sum_c1 + sum_c2 + sum_none + 1e-12  # prevent division by zero
 
-        # Normalize
-        denom = c1_contribution_of_dim_i + c2_contribution_of_dim_i + 1e-12
-        c1_contribution[i] = c1_contribution_of_dim_i / denom
-        c2_contribution[i] = c2_contribution_of_dim_i / denom
+        c1_contribution[i] = sum_c1 / total
+        c2_contribution[i] = sum_c2 / total
+        none_contribution[i] = sum_none / total
 
-    # Plot a stacked bar chart
+    # Plot a stacked bar chart.
     indices = np.arange(num_dims)
     plt.figure(figsize=(10, 6))
 
-    # Bottom part of the bar = c1_contribution (C1)
+    # Plot bottom layer: C1 contributions (red)
     plt.bar(indices, c1_contribution, color='red', label='C1')
-
-    # Top part of the bar = c2_contribution (C2), stacked on top of c1_contribution
+    # Plot middle layer: C2 contributions (blue), stacked on top of C1
     plt.bar(indices, c2_contribution, bottom=c1_contribution, color='blue', label='C2')
+    # Plot top layer: None contributions (grey), stacked on top of C1+C2
+    plt.bar(indices, none_contribution, bottom=c1_contribution + c2_contribution, color='grey', label='None')
 
-    # Cosmetics
+    # Cosmetic adjustments
     plt.xticks(indices, [f"Dim {i}" for i in range(num_dims)], rotation=90)
     plt.ylim([0, 1])
     plt.xlabel("Original Dimension Index", fontsize=12)
     plt.ylabel("Normalized Concept Contribution", fontsize=12)
-    plt.title("C1 vs C2 Concept Contribution for each Original Dimension", fontsize=14)
+    plt.title("Concept Contribution per Original Dimension", fontsize=14)
     plt.legend(loc='upper right')
     plt.tight_layout()
 
@@ -278,7 +339,7 @@ def build_test_R(safe_location):
 
 if __name__ == "__main__":
     # build_test_R("trained_models/identity_even_odd_R.bin")
-    load_R = "trained_models/mnistdpl_MNISTPairsEncoder_0.0_None_R.bin"
+    load_R = "trained_models/mnistnn_MNISTPairsEncoder_R10.bin"
     visualize_rotation_matrix(saved_R_path=load_R)
     visualize_concept_contribution(saved_R_path=load_R)
-    visualize_rotation_degrees(saved_R_path=load_R)
+    # visualize_rotation_degrees(saved_R_path=load_R)
