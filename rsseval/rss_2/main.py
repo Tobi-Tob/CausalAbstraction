@@ -19,6 +19,7 @@ from utils.args import *
 from utils.checkpoint import create_load_ckpt
 from utils.conf import *
 from utils.train import train
+from utils.test import test
 
 conf_path = os.getcwd() + "."
 sys.path.append(conf_path)
@@ -75,7 +76,7 @@ def main(args):
     # perform posthoc evaluation/ cl training/ joint training
     print('    Chosen device:', model.device)
     if args.posthoc:
-        pass
+        test(model, dataset, args)  # test the model if post-hoc is passed
     else:
         train(model, dataset, loss, args)
 
@@ -134,16 +135,17 @@ General Arguments
         Example: --wandb my_project
 
     --checkin
-        Description: Specifies the path to load a checkpoint.
+        Description: Specifies the path to load a checkpoint. Used for posthoc evaluation
         Example: --checkin /path/to/checkpoint
 
     --checkout
         Description: Saves the trained model to data/ckpts.
 
     --posthoc
-        Description: The --posthoc flag loads the saved model and evaluates it directly on the test dataset. This bypasses any training process and
-        focuses solely on performance metrics. Uses test.py script that searches for saved models according to the provided args, also seed is fixed
-        Example: python main.py --dataset shortmnist --model mnistdpl --posthoc
+        Description: The --posthoc flag loads a saved model and evaluates it directly on the test dataset. This bypasses any training process and
+        focuses solely on performance metrics. Uses test.py script that searches for saved models according to the provided args
+        Example: python main.py --posthoc --model mnistdpl --dataset addmnist --task addition --checkin trained_models/mnistdpl_MNISTSingleEncoder.pth
+
 
     --probe
         Description: The --probe flag performs a non-linear probing analysis of the trained model. It evaluates how well the model's learned

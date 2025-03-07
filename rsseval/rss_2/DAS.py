@@ -588,7 +588,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--pretrained",
         type=str,
-        default="trained_models/mnistdpl_MNISTSingleEncoder_1.0_None.pth",
+        default="trained_models/mnistdpl_MNISTSingleEncoder.pth",
         help="Path to the state dict containing the pretrained target model; if None, the target model is randomly initialized",
     )
     parser.add_argument(
