@@ -1,6 +1,5 @@
 import os
 import re
-
 import numpy as np
 import torch
 from numpy import linalg as LA
@@ -57,8 +56,9 @@ def extract_hypothesis(path: str) -> int:
     Assumes the file name contains a segment like "R10" where 10 is the hypothesis ID.
     If no such segment is found, returns None.
     """
-    # Split the path using '.', '_', '/' or '-' as delimiters.
-    parts = re.split(r"[._/-]+", path)
+    # Use os.path.basename to work only with the file name
+    base = os.path.basename(path)
+    parts = re.split(r"[._/\\-]+", base)
     for part in parts:
         if part.startswith('R') and part[1:].isdigit():
             return int(part[1:])
@@ -204,19 +204,6 @@ def visualize_rotation_matrix(saved_R_path: str):
         else:
             tick.set_color("grey")
 
-    # Color the tick labels on the y-axis.
-    for tick in ax.get_yticklabels():
-        try:
-            idx = int(tick.get_text())
-        except ValueError:
-            continue
-        if idx in alignment_hypothesis.C1_dims:
-            tick.set_color("red")
-        elif idx in alignment_hypothesis.C2_dims:
-            tick.set_color("blue")
-        else:
-            tick.set_color("grey")
-
     # Add matrix properties as text below the heatmap
     text_props = f"Orthogonal: {is_orthogonal}\nOrthonormal: {is_orthonormal}"
     plt.figtext(0.5, -0.1, text_props, wrap=True, horizontalalignment='center', fontsize=12)
@@ -337,9 +324,29 @@ def build_test_R(safe_location):
     torch.save(R, safe_location)
 
 
+def visualize_directory(directory: str):
+    """
+    Iterates over all files in the specified directory that match the pattern ...R<integer>.bin
+    and calls the visualization functions for each valid file.
+    """
+    # Define a regex pattern that matches any filename ending with R<integer>.bin
+    pattern = re.compile(r".*R\d+\.bin$")
+
+    # Iterate over all files in the given directory
+    for filename in os.listdir(directory):
+        if pattern.match(filename):
+            file_path = os.path.join(directory, filename)
+            print(f"Processing {file_path}")
+            visualize_rotation_matrix(saved_R_path=file_path)
+            visualize_concept_contribution(saved_R_path=file_path)
+
+
 if __name__ == "__main__":
     # build_test_R("trained_models/identity_even_odd_R.bin")
-    load_R = "trained_models/mnistnn_MNISTPairsEncoder_R10.bin"
-    visualize_rotation_matrix(saved_R_path=load_R)
-    visualize_concept_contribution(saved_R_path=load_R)
+    # load_R = "trained_models/mnistnn_MNISTPairsEncoder_R10.bin"
+    # visualize_rotation_matrix(saved_R_path=load_R)
+    # visualize_concept_contribution(saved_R_path=load_R)
     # visualize_rotation_degrees(saved_R_path=load_R)
+
+    directory = "trained_models/mnistnn_pairs"
+    visualize_directory(directory)

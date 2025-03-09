@@ -516,11 +516,17 @@ def eval_DAS_alignment(target_model, state_dict_path, data_split: str, saved_R_p
         raise ValueError("Batch size not extracted from counterfactual data path")
 
     def extract_hypothesis(path: str) -> int:
-        parts = re.split(r"[._/-]+", path)
+        """
+        Extracts the hypothesis ID from the file path.
+        Assumes the file name contains a segment like "R10" where 10 is the hypothesis ID.
+        If no such segment is found, returns None.
+        """
+        # Use os.path.basename to work only with the file name
+        base = os.path.basename(path)
+        parts = re.split(r"[._/\\-]+", base)
         for part in parts:
             if part.startswith('R') and part[1:].isdigit():
                 return int(part[1:])
-
         raise ValueError("Hypothesis ID not extracted from saved R path")
 
     bs = extract_batch_size(counterfactual)  # Assure we use the correct bs that was used for counterfactual data generation

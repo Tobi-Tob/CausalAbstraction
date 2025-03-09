@@ -45,7 +45,10 @@ def test(model, dataset: BaseDataset, args):
 
     print("--- Start of Test Evaluation ---")
     # Evaluate metrics: assuming these functions return
-    # true labels, true concepts, predicted labels, and predicted concepts.
+    # y_true = true labels of data size
+    # c_true = true concepts of size 2x datasize as concatenation of C1,C2
+    # y_pred = predicted labels of data size
+    # c_pred = predicted concepts of size 2x datasize as concatenation of C1,C2
     y_true, c_true, y_pred, c_pred = evaluate_metrics(model, test_loader, args, last=True)
     yac, yf1 = evaluate_mix(y_true, y_pred)
     cac, cf1 = evaluate_mix(c_true, c_pred)
@@ -57,12 +60,25 @@ def test(model, dataset: BaseDataset, args):
     cm_labels = confusion_matrix(y_true, y_pred)
     cm_concepts = confusion_matrix(c_true, c_pred)
 
+    # Compute 100x100 confusion matrix for digit pairs
+    # Here we assume that c_true and c_pred are 1D arrays of length 2*N,
+    # where the first N entries correspond to the first digit (g1 or c1)
+    # and the second N entries correspond to the second digit (g2 or c2).
+    N = len(c_true) // 2
+    # Encode each digit pair into a unique label: (digit1, digit2) -> digit1*10 + digit2
+    true_pairs = (c_true[:N].astype(int) * 10) + c_true[N:].astype(int)
+    print(true_pairs)
+    pred_pairs = (c_pred[:N].astype(int) * 10) + c_pred[N:].astype(int)
+    print(pred_pairs)
+    # Create confusion matrix for pairs with all 100 possible labels (0 to 99)
+    cm_pairs = confusion_matrix(true_pairs, pred_pairs, labels=list(range(100)))
+
     # Get the number of classes based on the confusion matrix shape
     num_label_classes = cm_labels.shape[0]
     num_concept_classes = cm_concepts.shape[0]
 
-    # Create a figure with two subplots: one for labels, one for concepts
-    fig, axs = plt.subplots(1, 2, figsize=(14, 6))
+    # Create a figure with three subplots: labels, concepts, and digit-pair confusion matrices
+    fig, axs = plt.subplots(1, 3, figsize=(24, 8))
 
     # Plot the label confusion matrix
     sns.heatmap(cm_labels, annot=True, fmt="d", cmap="Blues",
@@ -81,6 +97,17 @@ def test(model, dataset: BaseDataset, args):
     axs[1].set_title(f"Concept Confusion Matrix\nACC: {cac * 100:.2f}%, F1: {cf1 * 100:.2f}%")
     axs[1].set_xlabel("Predicted Concept")
     axs[1].set_ylabel("True Concept")
+
+    # Plot the 100x100 digit-pair confusion matrix
+    sns.heatmap(cm_pairs, annot=False, cmap="Purples", ax=axs[2])
+    axs[2].set_xticks(range(0, 100, 5))
+    axs[2].set_xticklabels([f"{i // 10},{i % 10}" for i in range(0, 100, 5)], fontsize=8)
+    axs[2].set_yticks(range(0, 100, 5))
+    axs[2].set_yticklabels([f"{i // 10},{i % 10}" for i in range(0, 100, 5)], fontsize=8)
+    axs[2].set_title("Digit-Pair Confusion Matrix")
+    axs[2].set_xlabel("Predicted Pair")
+    axs[2].set_ylabel("True Pair")
+
     plt.tight_layout()
 
     if model_path != "random_baseline":
