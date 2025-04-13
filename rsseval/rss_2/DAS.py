@@ -527,10 +527,13 @@ def eval_DAS_alignment(target_model, state_dict_path, data_split: str, saved_R_p
         for part in parts:
             if part.startswith('R') and part[1:].isdigit():
                 return int(part[1:])
-        raise ValueError("Hypothesis ID not extracted from saved R path")
+        return None
 
     bs = extract_batch_size(counterfactual)  # Assure we use the correct bs that was used for counterfactual data generation
-    alignment_hypothesis = AlignmentHypothesis(extract_hypothesis(saved_R_path))  # Get AlignmentHypothesis used for this R
+    hypothesis_id = extract_hypothesis(saved_R_path)
+    if hypothesis_id is None:
+        hypothesis_id = R.shape[0] // 2  # Assumes even h_dim
+    alignment_hypothesis = AlignmentHypothesis(hypothesis_id)  # Get AlignmentHypothesis used for this R
 
     # Load the counterfactual data
     print(f"loading counterfactual {data_split} data")
@@ -594,7 +597,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--pretrained",
         type=str,
-        default="trained_models/mnistdpl_MNISTSingleEncoder.pth",
+        default=None,
         help="Path to the state dict containing the pretrained target model; if None, the target model is randomly initialized",
     )
     parser.add_argument(
@@ -643,13 +646,15 @@ if __name__ == "__main__":
     counterfactual_test = "data/mnist_add_counterfactual_test_data_bs100.pt"
 
     pretrained_path = args.pretrained
-    # Check if model name is in pretrained path
-    if args.model not in pretrained_path:
-        raise ValueError(f"Model name '{args.model}' not found in pretrained path '{pretrained_path}'")
-    # Check if 'PairsEncoder' or 'SingleEncoder' is correctly specified
-    expected_encoder = "PairsEncoder" if args.joint else "SingleEncoder"
-    if expected_encoder not in pretrained_path:
-        raise ValueError(f"Expected '{expected_encoder}' in pretrained path '{pretrained_path}', but not found.")
+    if pretrained_path is None:
+        print(f"Random initialization of model {args.model}!")
+    else:  # Check if model name is in pretrained path
+        if args.model not in pretrained_path:
+            raise ValueError(f"Model name '{args.model}' not found in pretrained path '{pretrained_path}'")
+        # Check if 'PairsEncoder' or 'SingleEncoder' is correctly specified
+        expected_encoder = "PairsEncoder" if args.joint else "SingleEncoder"
+        if expected_encoder not in pretrained_path:
+            raise ValueError(f"Expected '{expected_encoder}' in pretrained path '{pretrained_path}', but not found.")
 
     if args.only_eval:
         """

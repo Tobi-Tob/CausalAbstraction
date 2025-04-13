@@ -187,9 +187,9 @@ def visualize_rotation_matrix(saved_R_path: str):
         linecolor="black"
     )
 
-    plt.title("Heatmap of the Rotation Matrix")
-    plt.xlabel("Columns")
-    plt.ylabel("Rows")
+    plt.title("Heatmap of the Rotation Matrix R")
+    # plt.xlabel("Columns")
+    # plt.ylabel("Rows")
 
     # Color the tick labels on the x-axis.
     for tick in ax.get_xticklabels():
@@ -205,8 +205,8 @@ def visualize_rotation_matrix(saved_R_path: str):
             tick.set_color("grey")
 
     # Add matrix properties as text below the heatmap
-    text_props = f"Orthogonal: {is_orthogonal}\nOrthonormal: {is_orthonormal}"
-    plt.figtext(0.5, -0.1, text_props, wrap=True, horizontalalignment='center', fontsize=12)
+    # text_props = f"Orthogonal: {is_orthogonal}\nOrthonormal: {is_orthonormal}"
+    # plt.figtext(0.5, -0.1, text_props, wrap=True, horizontalalignment='center', fontsize=12)
 
     # Adjust layout and save the heatmap to file
     plt.tight_layout()
@@ -257,9 +257,9 @@ def visualize_concept_contribution(saved_R_path: str):
     for i in range(num_dims):
         row_i = R[i, :]
         # Sum of contributions for each concept based on the hypothesis split.
-        sum_c1 = np.sum(row_i[alignment_hypothesis.C1_dims]**2) if alignment_hypothesis.C1_dims else 0.0
-        sum_c2 = np.sum(row_i[alignment_hypothesis.C2_dims]**2) if alignment_hypothesis.C2_dims else 0.0
-        sum_none = np.sum(row_i[alignment_hypothesis.none_dims]**2) if alignment_hypothesis.none_dims else 0.0
+        sum_c1 = np.sum(row_i[alignment_hypothesis.C1_dims] ** 2) if alignment_hypothesis.C1_dims else 0.0
+        sum_c2 = np.sum(row_i[alignment_hypothesis.C2_dims] ** 2) if alignment_hypothesis.C2_dims else 0.0
+        sum_none = np.sum(row_i[alignment_hypothesis.none_dims] ** 2) if alignment_hypothesis.none_dims else 0.0
 
         total = sum_c1 + sum_c2 + sum_none + 1e-12  # prevent division by zero
 
@@ -341,12 +341,63 @@ def visualize_directory(directory: str):
             visualize_concept_contribution(saved_R_path=file_path)
 
 
+def visualize_dii_scores():
+    """
+    Visualizes the DII scores for different hypotheses (1 to 10 elements per concept).
+    The x-axis represents the number of elements per concept in the hypothesis,
+    and the y-axis represents the DII score.
+    The plot includes four tested methods with hardcoded values.
+
+    A grey shaded region is added from 0.95 to 1.0 on the Y-axis to highlight the
+    area where models fully align with the causal abstraction.
+    """
+    # Hardcoded DII scores for hypotheses with 1 to 10 elements per concept
+    hypotheses = np.arange(1, 11)  # X-axis: Hypotheses (1 to 10 elements per concept)
+
+    # Hardcoded DII scores for each method
+    dii_dpl_single = [0.1463, 0.2087, 0.3737, 0.5031, 0.7419, 0.8641, 0.9232, 0.9650, 0.9869, 0.9924]
+    dii_dpl_pairs = [0.1307, 0.2038, 0.3498, 0.5200, 0.7306, 0.8928, 0.9351, 0.9646, 0.9819, 0.9837]
+    dii_nn_single = [0.1610, 0.2939, 0.4528, 0.6279, 0.8028, 0.9445, 0.9724, 0.9725, 0.9731, 0.9741]
+    dii_nn_pairs = [0.1321, 0.1661, 0.2288, 0.2541, 0.3045, 0.3467, 0.3862, 0.4124, 0.4532, 0.4542]
+
+    # Add shaded grey region for DII scores >= 0.95
+    plt.figure(figsize=(10, 6))
+    plt.axhspan(0.95, 1.0, color='grey', alpha=0.3)
+
+    # Plot each method's DII scores
+    plt.plot(hypotheses, dii_dpl_single, marker='o', linestyle='-', color='red', label="DPL (disentangled)")
+    plt.plot(hypotheses, dii_dpl_pairs, marker='s', linestyle='-', color='orange', label="DPL (joint)")
+    plt.plot(hypotheses, dii_nn_single, marker='^', linestyle='--', color='blue', label="NN (disentangled)")
+    plt.plot(hypotheses, dii_nn_pairs, marker='d', linestyle='--', color='purple', label="NN (joint)")
+
+    # Label for the grey abstraction region
+    plt.text(1, 0.96, "Implements the defined abstraction", fontsize=12, color='black', ha='left', alpha=0.6)
+
+    # Customize the plot
+    plt.xlabel("Number of Elements per Concept (different hypothesis)", fontsize=12)
+    plt.ylabel("DII Score (best accuracy found)", fontsize=12)
+    plt.title("DII Scores for Different Hypotheses", fontsize=14)
+    plt.xticks(hypotheses)
+    plt.yticks(np.arange(0.0, 1.01, 0.1))
+    plt.ylim([0.0, 1.0])  # Y-axis from 0 to 1
+    plt.grid(True, linestyle="--", alpha=0.5)
+    plt.legend(loc="lower right", fontsize=10)
+
+    # Save the figure
+    plt.tight_layout()
+    plt.savefig("dii_scores_plot.png", dpi=200)
+    plt.close()
+    print("Saved DII scores plot to: dii_scores_plot.png")
+
+
 if __name__ == "__main__":
     # build_test_R("trained_models/identity_even_odd_R.bin")
-    # load_R = "trained_models/mnistnn_MNISTPairsEncoder_R10.bin"
-    # visualize_rotation_matrix(saved_R_path=load_R)
-    # visualize_concept_contribution(saved_R_path=load_R)
+    load_R = "trained_models/mnistdpl_MNISTPairsEncoder_0.0_6_R10.bin"
+    visualize_rotation_matrix(saved_R_path=load_R)
+    visualize_concept_contribution(saved_R_path=load_R)
     # visualize_rotation_degrees(saved_R_path=load_R)
 
-    directory = "trained_models/mnistnn_pairs"
-    visualize_directory(directory)
+    # directory = "trained_models/mnistnn_pairs"
+    # visualize_directory(directory)
+
+    # visualize_dii_scores()
