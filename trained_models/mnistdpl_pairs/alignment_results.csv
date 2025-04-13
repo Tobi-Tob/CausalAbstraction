@@ -1,0 +1,14 @@
+hypothesis_id,DII_score,C1_dims,C2_dims,R_path
+1,0.1307,[0],[1],trained_models\mnistdpl_pairs\R1.bin
+2,0.2038,"[0, 1]","[2, 3]",trained_models\mnistdpl_pairs\R2.bin
+3,0.3498,"[0, 1, 2]","[3, 4, 5]",trained_models\mnistdpl_pairs\R3.bin
+4,0.52,"[0, 1, 2, 3]","[4, 5, 6, 7]",trained_models\mnistdpl_pairs\R4.bin
+5,0.7306,"[0, 1, 2, 3, 4]","[5, 6, 7, 8, 9]",trained_models\mnistdpl_pairs\R5.bin
+6,0.8928,"[0, 1, 2, 3, 4, 5]","[6, 7, 8, 9, 10, 11]",trained_models\mnistdpl_pairs\R6.bin
+7,0.9351,"[0, 1, 2, 3, 4, 5, 6]","[7, 8, 9, 10, 11, 12, 13]",trained_models\mnistdpl_pairs\R7.bin
+8,0.9646,"[0, 1, 2, 3, 4, 5, 6, 7]","[8, 9, 10, 11, 12, 13, 14, 15]",trained_models\mnistdpl_pairs\R8.bin
+9,0.9819,"[0, 1, 2, 3, 4, 5, 6, 7, 8]","[9, 10, 11, 12, 13, 14, 15, 16, 17]",trained_models\mnistdpl_pairs\R9.bin
+10,0.9837,"[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]","[10, 11, 12, 13, 14, 15, 16, 17, 18, 19]",trained_models\mnistdpl_pairs\R10.bin
+
+DII score 0.7955 (mnistdpl_MNISTPairsEncoder_0.0_5.pth)
+DII score 0.4286 (mnistdpl_MNISTPairsEncoder_0.0_6.pth)

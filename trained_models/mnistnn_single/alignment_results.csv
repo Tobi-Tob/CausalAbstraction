@@ -1,0 +1,11 @@
+hypothesis_id,DII_score,C1_dims,C2_dims,R_path
+1,0.161,[0],[1],trained_models\mnistnn_single\R1.bin
+2,0.2939,"[0, 1]","[2, 3]",trained_models\mnistnn_single\R2.bin
+3,0.4528,"[0, 1, 2]","[3, 4, 5]",trained_models\mnistnn_single\R3.bin
+4,0.6279,"[0, 1, 2, 3]","[4, 5, 6, 7]",trained_models\mnistnn_single\R4.bin
+5,0.8028,"[0, 1, 2, 3, 4]","[5, 6, 7, 8, 9]",trained_models\mnistnn_single\R5.bin
+6,0.9445,"[0, 1, 2, 3, 4, 5]","[6, 7, 8, 9, 10, 11]",trained_models\mnistnn_single\R6.bin
+7,0.9724,"[0, 1, 2, 3, 4, 5, 6]","[7, 8, 9, 10, 11, 12, 13]",trained_models\mnistnn_single\R7.bin
+8,0.9725,"[0, 1, 2, 3, 4, 5, 6, 7]","[8, 9, 10, 11, 12, 13, 14, 15]",trained_models\mnistnn_single\R8.bin
+9,0.9731,"[0, 1, 2, 3, 4, 5, 6, 7, 8]","[9, 10, 11, 12, 13, 14, 15, 16, 17]",trained_models\mnistnn_single\R9.bin
+10,0.9741,"[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]","[10, 11, 12, 13, 14, 15, 16, 17, 18, 19]",trained_models\mnistnn_single\R10.bin

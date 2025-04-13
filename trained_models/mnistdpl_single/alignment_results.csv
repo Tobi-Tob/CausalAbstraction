@@ -1,0 +1,11 @@
+hypothesis_id,DII_score,C1_dims,C2_dims,R_path
+1,0.1463,[0],[1],trained_models\mnistdpl_single\R1.bin
+2,0.2087,"[0, 1]","[2, 3]",trained_models\mnistdpl_single\R2.bin
+3,0.3737,"[0, 1, 2]","[3, 4, 5]",trained_models\mnistdpl_single\R3.bin
+4,0.5031,"[0, 1, 2, 3]","[4, 5, 6, 7]",trained_models\mnistdpl_single\R4.bin
+5,0.7419,"[0, 1, 2, 3, 4]","[5, 6, 7, 8, 9]",trained_models\mnistdpl_single\R5.bin
+6,0.8641,"[0, 1, 2, 3, 4, 5]","[6, 7, 8, 9, 10, 11]",trained_models\mnistdpl_single\R6.bin
+7,0.9232,"[0, 1, 2, 3, 4, 5, 6]","[7, 8, 9, 10, 11, 12, 13]",trained_models\mnistdpl_single\R7.bin
+8,0.965,"[0, 1, 2, 3, 4, 5, 6, 7]","[8, 9, 10, 11, 12, 13, 14, 15]",trained_models\mnistdpl_single\R8.bin
+9,0.9869,"[0, 1, 2, 3, 4, 5, 6, 7, 8]","[9, 10, 11, 12, 13, 14, 15, 16, 17]",trained_models\mnistdpl_single\R9.bin
+10,0.9924,"[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]","[10, 11, 12, 13, 14, 15, 16, 17, 18, 19]",trained_models\mnistdpl_single\R10.bin
