@@ -13,6 +13,8 @@
 
 ✅ **Concept information is not evenly distributed across latent dimensions**.
 
+For a detailed explanation of our methodology and findings, please refer to our full project report: [Causal_Abstraction.pdf](./Causal_Abstraction.pdf).
+
 ---
 ## 📂 Directory Structure
 ```
